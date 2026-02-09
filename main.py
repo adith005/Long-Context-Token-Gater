@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import sys
 from gating.token_gater import gate
 from llm.llm_interface import build_prompt, query_llm
@@ -29,7 +28,7 @@ if __name__ == "__main__":
             print("\n🧠 Generating response...")
             answer = query_llm(prompt)
             print("\nAssistant:", answer)
-=======
+
 from gating.token_gater import gate
 from llm.llm_interface import build_prompt, query_llm
 
@@ -50,4 +49,4 @@ if __name__ == "__main__":
         print("\n🧠 Generating response...")
         answer = query_llm(prompt)
         print("\nAssistant:", answer)
->>>>>>> 07dbd231591e9d8949116c306e72c9c24b85e74d
+
