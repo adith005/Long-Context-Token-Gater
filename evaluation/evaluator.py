@@ -12,10 +12,7 @@ try:
     from llm.llm_interface import query_llm, build_prompt
     from gating.token_gater import (
         gate, 
-        apply_stepwise_gating, 
-        apply_hybrid_scoring_gating, 
-        apply_diversity_gating, 
-        apply_token_budget_gating
+        gate_with_entropy
     )
     from utils.text_utils import count_tokens
 except ImportError as e:
@@ -38,14 +35,8 @@ def query_token_optimiser(prompt_text, gating_mode=None):
     start_time = time.perf_counter()
 
     # Logic for different gating strategies
-    if gating_mode == "stepwise":
-        gated_prompt = apply_stepwise_gating(prompt_text)
-    elif gating_mode == "hybrid":
-        gated_prompt = apply_hybrid_scoring_gating(prompt_text)
-    elif gating_mode == "diversity":
-        gated_prompt = apply_diversity_gating(prompt_text)
-    elif gating_mode == "token_budget":
-        gated_prompt = apply_token_budget_gating(prompt_text)
+    if gating_mode == "Entropy based gating":
+        gated_prompt = gate_with_entropy(prompt_text)
     elif gating_mode == "original_gating":
         context = gate(prompt_text)
         gated_prompt = build_prompt(context, prompt_text)
@@ -98,7 +89,7 @@ def evaluate_model(model_config, client, query):
     print(f"Starting Evaluation for Model: {model_config['name']}")
     print("="*80)
     
-    gating_modes = [None, "original_gating", "stepwise", "hybrid", "diversity", "token_budget"]
+    gating_modes = [None, "original_gating", "Entropy based gating"]
     all_results = []
 
     for mode in gating_modes:

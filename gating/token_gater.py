@@ -1,261 +1,333 @@
-from memory.history_db import retrieve_similar
-from rag.retriever import retrieve
 import math
 import numpy as np
-from typing import List, Callable, Tuple
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.cluster import AgglomerativeClustering
+from typing import List, Dict, Optional, Tuple
+from dataclasses import dataclass
 
-# ============================================================
-# Entropy Utilities
-# ============================================================
-def shannon_entropy(probs: List[float]) -> float:
-    """Compute Shannon entropy from token probabilities."""
-    return -sum(p * math.log(p + 1e-9) for p in probs)
+from memory.history_db import retrieve_similar
+from rag.retriever import retrieve
 
-def estimate_entropy(prompt: str, llm_predict: Callable[[str], List[float]]) -> float:
-    """
-    Estimate model uncertainty for a given prompt.
-    llm_predict must return token probabilities.
-    """
-    probs = llm_predict(prompt)
-    return shannon_entropy(probs)
 
-# ============================================================
-# Mock LLM Predictor (replace later with real logprobs)
-# ============================================================
-def mock_llm_predict(prompt: str) -> List[float]:
-    """
-    Temporary entropy proxy.
-    Replace with OpenAI / HF logprob-based predictor later.
-    """
-    import random
-    vocab_size = 20
-    probs = [random.random() for _ in range(vocab_size)]
-    total = sum(probs)
-    return [p / total for p in probs]
+# =============================================================================
+# ORIGINAL GATE FUNCTION (PRESERVED)
+# =============================================================================
 
-# ============================================================
-# Semantic Entropy Utilities
-# ============================================================
-def compute_semantic_entropy(
-    outputs: List[str],
-    embed_model,
-    similarity_threshold: float = 0.8
-) -> float:
+def gate(query, memory_weight=0.6, doc_weight=0.4, top_k=5):
     """
-    Compute semantic entropy by clustering outputs and calculating Shannon entropy.
+    Original simple gating function with weighted merging.
     
     Args:
-        outputs: List of generated text outputs
-        embed_model: Embedding model with encode() method
-        similarity_threshold: Threshold for clustering (higher = fewer clusters)
-    
+        query: User query string
+        memory_weight: Weight for memory results (default: 0.6)
+        doc_weight: Weight for document results (default: 0.4)
+        top_k: Number of results to return
+        
     Returns:
-        Semantic entropy value
-    """
-    if len(outputs) == 0:
-        return 0.0
-    
-    if len(outputs) == 1:
-        return 0.0
-    
-    # Encode all outputs
-    embeddings = np.array([embed_model.encode(output) for output in outputs])
-    
-    # Cluster by semantic similarity
-    # Using agglomerative clustering with cosine distance
-    clustering = AgglomerativeClustering(
-        n_clusters=None,
-        distance_threshold=1 - similarity_threshold,
-        metric='cosine',
-        linkage='average'
-    )
-    cluster_labels = clustering.fit_predict(embeddings)
-    
-    # Compute cluster probabilities
-    unique_clusters, cluster_counts = np.unique(cluster_labels, return_counts=True)
-    p_clusters = cluster_counts / len(outputs)
-    
-    # Compute Shannon entropy
-    se = -sum(p * math.log(p + 1e-9) for p in p_clusters)
-    
-    return se
-
-def softmax(scores: List[float], alpha: float = 1.0) -> np.ndarray:
-    """Apply softmax with temperature parameter alpha."""
-    scores_array = np.array(scores)
-    exp_scores = np.exp(scores_array / alpha)
-    return exp_scores / np.sum(exp_scores)
-
-# ============================================================
-# Gater with Semantic Entropy and Similarity
-# ============================================================
-def gater_semantic_entropy_similarity(
-    query: str,
-    chat_history: List[str],
-    llm_sample: Callable[[str], str],
-    embed_model,
-    K: int = 5,
-    R: int = 10,
-    alpha: float = 1.0,
-    lambda_param: float = 0.5,
-    T: int = 5,
-    similarity_threshold: float = 0.8
-) -> List[str]:
-    """
-    Gate function using semantic similarity and semantic entropy.
-    
-    Args:
-        query: User query
-        chat_history: List of historical messages
-        llm_sample: Function to sample output from LLM given context
-        embed_model: Embedding model with encode() method
-        K: Final number of messages to select
-        R: Number of messages in shortlist (based on similarity)
-        alpha: Temperature parameter for softmax
-        lambda_param: Weight for similarity vs entropy (0-1)
-        T: Number of output samples for entropy estimation
-        similarity_threshold: Threshold for semantic clustering
-    
-    Returns:
-        List of selected messages
-    """
-    if len(chat_history) == 0:
-        return []
-    
-    # Step 1: Semantic similarity shortlist
-    q_embed = embed_model.encode(query).reshape(1, -1)
-    
-    sim_scores = []
-    for message in chat_history:
-        m_embed = embed_model.encode(message).reshape(1, -1)
-        sim = cosine_similarity(q_embed, m_embed)[0][0]
-        sim_scores.append(sim)
-    
-    # Apply softmax to get relevance scores
-    rel_scores = softmax(sim_scores, alpha)
-    
-    # Select top-R by similarity
-    R_actual = min(R, len(chat_history))
-    shortlist_idx = np.argsort(rel_scores)[-R_actual:][::-1]
-    
-    # Step 2: Compute semantic entropy for shortlist
-    SE_scores = []
-    for idx in shortlist_idx:
-        message = chat_history[idx]
-        context = query + "\n" + message
-        
-        # Generate T candidate outputs
-        outputs = []
-        for _ in range(T):
-            output = llm_sample(context)
-            outputs.append(output)
-        
-        # Compute semantic entropy
-        se = compute_semantic_entropy(outputs, embed_model, similarity_threshold)
-        SE_scores.append(se)
-    
-    # Normalize semantic entropy
-    if len(SE_scores) > 0 and max(SE_scores) > 0:
-        max_SE = max(SE_scores)
-        normalized_SE = [se / max_SE for se in SE_scores]
-    else:
-        normalized_SE = [0.0] * len(SE_scores)
-    
-    # Step 3: Combined score for shortlist
-    combined = []
-    for j, idx in enumerate(shortlist_idx):
-        score = lambda_param * rel_scores[idx] + (1 - lambda_param) * normalized_SE[j]
-        combined.append((idx, score))
-    
-    # Step 4: Select top-K overall
-    K_actual = min(K, len(combined))
-    combined_sorted = sorted(combined, key=lambda x: x[1], reverse=True)
-    final_idx = [idx for idx, _ in combined_sorted[:K_actual]]
-    
-    selected_messages = [chat_history[i] for i in final_idx]
-    
-    return selected_messages
-
-# ============================================================
-# Entropy-Based Memory Hit Ratio Gating (ORIGINAL)
-# ============================================================
-def apply_entropy_memory_hit_gating(
-    query: str,
-    candidates: List[str],
-    llm_predict: Callable[[str], List[float]] = mock_llm_predict,
-    entropy_threshold: float = 0.05,
-    token_budget: int = 256
-) -> Tuple[List[str], float]:
-    """
-    Select memories that reduce model entropy.
-    Returns:
-    - gated memory list
-    - memory hit ratio
-    """
-    base_entropy = estimate_entropy(query, llm_predict)
-    selected = []
-    useful = 0
-    total_tokens = 0
-    
-    for text in candidates:
-        token_cost = len(text.split())
-        if total_tokens + token_cost > token_budget:
-            continue
-        
-        combined_prompt = text + "\n" + query
-        new_entropy = estimate_entropy(combined_prompt, llm_predict)
-        delta_entropy = base_entropy - new_entropy
-        
-        if delta_entropy >= entropy_threshold:
-            selected.append(text)
-            total_tokens += token_cost
-            useful += 1
-    
-    memory_hit_ratio = useful / max(len(candidates), 1)
-    return selected, memory_hit_ratio
-
-# ============================================================
-# Main Gate Function (ORIGINAL INTERFACE)
-# ============================================================
-def gate(
-    query,
-    memory_weight=0.6,
-    doc_weight=0.4,
-    top_k=5,
-    llm_predict: Callable[[str], List[float]] = mock_llm_predict
-):
-    """
-    Retrieval + entropy-based memory hit ratio gating.
+        List of text strings from merged results
     """
     mem_results = retrieve_similar(query, k=top_k)
     doc_results = retrieve(query, k=top_k)
     
-    # Merge memory + document retrieval
+    # Merge and score
     merged = []
     for m in mem_results:
-        merged.append({
-            "source": "memory",
-            "text": m["response"],
-            "score": memory_weight
-        })
+        merged.append({"source": "memory", "text": m["response"], "score": memory_weight})
     for d in doc_results:
-        merged.append({
-            "source": "document",
-            "text": d,
-            "score": doc_weight
-        })
+        merged.append({"source": "document", "text": d, "score": doc_weight})
     
-    # Initial heuristic ordering
+    # Simple heuristic scoring and sort
     merged.sort(key=lambda x: x["score"], reverse=True)
-    texts = [m["text"] for m in merged[:top_k]]
+    return [m["text"] for m in merged[:top_k]]
+
+
+# =============================================================================
+# NEW ENTROPY-BASED INTELLIGENT GATING
+# =============================================================================
+
+@dataclass
+class MemoryToken:
+    """Represents a memory segment with metadata"""
+    content: str
+    similarity_score: float
+    entropy: float
+    token_count: int
+    source: str
+    source_type: str  # 'memory' or 'document'
+
+
+def calculate_shannon_entropy(text: str) -> float:
+    """
+    Calculate Shannon entropy to measure information content/uncertainty.
     
-    # Entropy-based gating
-    gated_texts, memory_hit_ratio = apply_entropy_memory_hit_gating(
-        query=query,
-        candidates=texts,
-        llm_predict=llm_predict
-    )
+    Lower entropy = more predictable/certain = higher priority
+    Higher entropy = more uncertain/random = lower priority
     
-    return gated_texts, memory_hit_ratio
+    Args:
+        text: Text content to analyze
+        
+    Returns:
+        Shannon entropy value
+    """
+    if not text:
+        return float('inf')
+    
+    # Character-level entropy
+    char_counts = {}
+    for char in text:
+        char_counts[char] = char_counts.get(char, 0) + 1
+    
+    total_chars = len(text)
+    entropy = 0.0
+    
+    for count in char_counts.values():
+        probability = count / total_chars
+        if probability > 0:
+            entropy -= probability * math.log2(probability)
+    
+    return entropy
+
+
+def calculate_normalized_entropy(text: str) -> float:
+    """
+    Calculate normalized Shannon entropy (0-1 range).
+    
+    Args:
+        text: Text content to analyze
+        
+    Returns:
+        Normalized entropy value between 0 and 1
+    """
+    entropy = calculate_shannon_entropy(text)
+    
+    if entropy == float('inf'):
+        return 1.0
+    
+    # Estimate based on typical character set
+    vocab_size = 256  # ASCII + extended
+    max_entropy = math.log2(vocab_size)
+    
+    if max_entropy == 0:
+        return 0.0
+    
+    return min(entropy / max_entropy, 1.0)
+
+
+def estimate_token_count(text: str) -> int:
+    """
+    Estimate token count for a text segment.
+    
+    Args:
+        text: Text to count tokens for
+        
+    Returns:
+        Estimated token count
+    """
+    # Rough estimation: ~0.75 tokens per word
+    words = len(text.split())
+    return int(words * 0.75) + 10  # Add small buffer
+
+
+def intelligent_gate(
+    query: str,
+    max_tokens: int = 4096,
+    memory_top_k: int = 10,
+    doc_top_k: int = 5,
+    strategy: str = 'entropy_weighted',
+    min_similarity: float = 0.0
+) -> Dict:
+    """
+    Intelligent gating with entropy-based selection.
+    
+    This is the NEW method that:
+    1. Searches memory with cosine similarity
+    2. Calculates Shannon entropy for each result
+    3. Creates context window with lowest uncertainty tokens
+    
+    Args:
+        query: User query string
+        max_tokens: Maximum tokens allowed in context window
+        memory_top_k: Number of memories to retrieve initially
+        doc_top_k: Number of documents to retrieve
+        strategy: Selection strategy ('entropy_weighted', 'lowest_entropy', 'hybrid')
+        min_similarity: Minimum similarity threshold
+        
+    Returns:
+        Dictionary containing:
+            - selected_memories: List of selected memory texts
+            - selected_documents: List of selected document texts
+            - total_tokens: Total token count
+            - metadata: Additional information about selection
+    """
+    # Step 1: Retrieve similar memories using cosine similarity
+    mem_results = retrieve_similar(query, k=memory_top_k)
+    doc_results = retrieve(query, k=doc_top_k)
+    
+    # Step 2: Create MemoryToken objects and calculate entropy
+    memory_tokens = []
+    
+    for idx, mem in enumerate(mem_results):
+        content = mem.get("response", "")
+        similarity = mem.get("similarity", 1.0)
+        
+        # Skip if below similarity threshold
+        if similarity < min_similarity:
+            continue
+        
+        # Calculate entropy
+        entropy = calculate_normalized_entropy(content)
+        token_count = estimate_token_count(content)
+        
+        memory_token = MemoryToken(
+            content=content,
+            similarity_score=similarity,
+            entropy=entropy,
+            token_count=token_count,
+            source=f'M{idx + 1}',
+            source_type='memory'
+        )
+        memory_tokens.append(memory_token)
+    
+    # Process documents similarly
+    doc_tokens = []
+    for idx, doc in enumerate(doc_results):
+        content = doc if isinstance(doc, str) else doc.get("text", "")
+        
+        entropy = calculate_normalized_entropy(content)
+        token_count = estimate_token_count(content)
+        
+        doc_token = MemoryToken(
+            content=content,
+            similarity_score=0.8,  # Default high score for retrieved docs
+            entropy=entropy,
+            token_count=token_count,
+            source=f'D{idx + 1}',
+            source_type='document'
+        )
+        doc_tokens.append(doc_token)
+    
+    # Step 3: Select tokens with lowest uncertainty based on strategy
+    all_tokens = memory_tokens + doc_tokens
+    
+    if strategy == 'lowest_entropy':
+        # Sort by entropy (ascending) - prefer low uncertainty
+        sorted_tokens = sorted(all_tokens, key=lambda x: x.entropy)
+    
+    elif strategy == 'entropy_weighted':
+        # Combine entropy and similarity: prefer high similarity + low entropy
+        # Score = similarity * (1 - entropy)
+        sorted_tokens = sorted(
+            all_tokens,
+            key=lambda x: x.similarity_score * (1 - x.entropy),
+            reverse=True
+        )
+    
+    elif strategy == 'hybrid':
+        # Multi-factor ranking
+        max_sim = max(t.similarity_score for t in all_tokens) if all_tokens else 1.0
+        
+        def hybrid_score(token):
+            norm_similarity = token.similarity_score / max_sim if max_sim > 0 else 0
+            certainty = 1 - token.entropy
+            # Weighted combination: 60% similarity, 40% certainty
+            return 0.6 * norm_similarity + 0.4 * certainty
+        
+        sorted_tokens = sorted(all_tokens, key=hybrid_score, reverse=True)
+    
+    else:
+        raise ValueError(f"Unknown strategy: {strategy}")
+    
+    # Select tokens that fit within context window
+    selected_tokens = []
+    current_token_count = 0
+    
+    for token in sorted_tokens:
+        if current_token_count + token.token_count <= max_tokens:
+            selected_tokens.append(token)
+            current_token_count += token.token_count
+        else:
+            break
+    
+    # Separate memories and documents
+    selected_memories = [t for t in selected_tokens if t.source_type == 'memory']
+    selected_documents = [t for t in selected_tokens if t.source_type == 'document']
+    
+    return {
+        'selected_memories': [m.content for m in selected_memories],
+        'selected_documents': [d.content for d in selected_documents],
+        'total_tokens': current_token_count,
+        'metadata': {
+            'memory_count': len(selected_memories),
+            'document_count': len(selected_documents),
+            'avg_memory_entropy': np.mean([m.entropy for m in selected_memories]) if selected_memories else 0,
+            'avg_memory_similarity': np.mean([m.similarity_score for m in selected_memories]) if selected_memories else 0,
+            'strategy': strategy,
+            'memory_details': [
+                {
+                    'source': m.source,
+                    'similarity': m.similarity_score,
+                    'entropy': m.entropy,
+                    'tokens': m.token_count
+                }
+                for m in selected_memories
+            ]
+        }
+    }
+
+
+def format_context_window(result: Dict, include_metadata: bool = False) -> str:
+    """
+    Format the intelligent_gate result into a context string for LLM.
+    
+    Args:
+        result: Output from intelligent_gate()
+        include_metadata: Whether to include metadata in output
+        
+    Returns:
+        Formatted context string
+    """
+    parts = []
+    
+    # Add memories
+    if result['selected_memories']:
+        parts.append("=== RELEVANT CHAT HISTORY ===\n")
+        for idx, memory in enumerate(result['selected_memories'], 1):
+            if include_metadata:
+                mem_meta = result['metadata']['memory_details'][idx - 1]
+                parts.append(
+                    f"[Memory {idx}] (Similarity: {mem_meta['similarity']:.3f}, "
+                    f"Certainty: {1 - mem_meta['entropy']:.3f})\n"
+                )
+            parts.append(f"{memory}\n")
+    
+    # Add documents
+    if result['selected_documents']:
+        parts.append("\n=== EXTERNAL DOCUMENTS ===\n")
+        for idx, doc in enumerate(result['selected_documents'], 1):
+            parts.append(f"[Document {idx}] {doc}\n")
+    
+    return "\n".join(parts)
+
+
+# =============================================================================
+# CONVENIENCE FUNCTIONS
+# =============================================================================
+
+def gate_with_entropy(
+    query: str,
+    max_tokens: int = 4096,
+    strategy: str = 'entropy_weighted'
+) -> List[str]:
+    """
+    Simplified interface for entropy-based gating that returns just the texts.
+    Similar signature to original gate() but with entropy selection.
+    
+    Args:
+        query: User query string
+        max_tokens: Maximum tokens in context
+        strategy: Selection strategy
+        
+    Returns:
+        List of selected text strings (memories + documents)
+    """
+    result = intelligent_gate(query, max_tokens=max_tokens, strategy=strategy)
+    return result['selected_memories'] + result['selected_documents']
+
