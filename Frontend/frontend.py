@@ -30,7 +30,7 @@ async def run_comparison(prompt, placeholder_gated, placeholder_non_gated, resul
 
     # Display gated results
     with placeholder_gated.container():
-        st.subheader("Non-Gating LLM")
+        st.subheader("Gating LLM")
         st.markdown(gated_response['response_text'])
         gated_df = pd.DataFrame([gated_response])
         gated_df['hypothetical_cost'] = calculate_inference_cost(gated_response['prompt_tokens'], 0.20 / 1_000_000, gated_response['completion_tokens'], 1.00 / 1_000_000)
@@ -39,7 +39,7 @@ async def run_comparison(prompt, placeholder_gated, placeholder_non_gated, resul
 
     # Display non-gated results
     with placeholder_non_gated.container():
-        st.subheader("Gating LLM")
+        st.subheader("Non-Gating LLM")
         st.markdown(non_gated_response['response_text'])
         non_gated_df = pd.DataFrame([non_gated_response])
         non_gated_df['hypothetical_cost'] = calculate_inference_cost(non_gated_response['prompt_tokens'], 0.20 / 1_000_000, non_gated_response['completion_tokens'], 1.00 / 1_000_000)
