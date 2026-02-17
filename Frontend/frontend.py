@@ -8,6 +8,7 @@ import pandas as pd
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from evaluation.evaluator import query_token_optimiser, calculate_inference_cost, calculate_cost_of_pass
+from rag.document_ingestor import ingest_pdf
 
 # --- Page Setup ---
 st.set_page_config(
@@ -17,6 +18,26 @@ st.set_page_config(
 
 st.title("⚔️ Token Optimizer Playground")
 st.markdown("Enter a prompt below to compare the performance of the gating and non-gating LLMs.")
+
+# PDF Uploader
+st.sidebar.header("Upload PDF")
+uploaded_file = st.sidebar.file_uploader("Upload a PDF document to add it to the knowledge base.", type="pdf")
+if uploaded_file is not None:
+    # Save the uploaded file to a temporary location
+    temp_dir = "C:\\Users\\loq\\.gemini\\tmp\\40f6fc11eddb620593067680f3494c55d7b294c7c8905e994d1518893911e3a0"
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_path = os.path.join(temp_dir, uploaded_file.name)
+    
+    with open(temp_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    
+    # Ingest the PDF
+    try:
+        chunks_ingested = ingest_pdf(temp_path)
+        st.sidebar.success(f"Successfully ingested {uploaded_file.name} ({chunks_ingested} chunks).")
+    except Exception as e:
+        st.sidebar.error(f"Error ingesting PDF: {e}")
+
 
 # --- Main Execution Loop ---
 async def run_comparison(prompt, placeholder_gated, placeholder_non_gated, results_gated, results_non_gated):
