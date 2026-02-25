@@ -1,333 +1,444 @@
-import math
+"""
+gater.py  —  Entropy-Optimised Context Gater
+=============================================
+
+Goal: smallest possible context window that retains all relevant information.
+
+Pipeline
+--------
+  1. Embed query once, reuse everywhere.
+  2. Gate memory  (Redis LIST)   →  confidence ≥ 50 %
+  3. Gate documents (Redis clusters)  →  confidence ≥ 50 %
+  4. Merge candidates, rank by confidence.
+  5. Entropy-guided window builder:
+       a. Add items greedily while H(window) is rising or stable.
+       b. Stop as soon as a plateau is detected — extra items add
+          redundancy without new information.
+       c. After building, prune: remove the lowest-confidence item
+          if removing it keeps H above the floor AND window shrinks.
+       d. Repeat prune until no further reduction is possible.
+  6. Return the minimal stable window + diagnostics.
+
+Entropy mechanics
+-----------------
+  H = -Σ p_i log2(p_i)   p = softmax(confidence scores in window)
+
+  Maximum diversity   →  log2(N) bits
+  Zero diversity      →  0 bits
+  Stable plateau      →  ΔH < ENTROPY_DELTA_THRESH between consecutive adds
+
+  We stop adding when new items no longer raise entropy meaningfully,
+  then prune backward to find the smallest set that keeps H ≥ ENTROPY_FLOOR.
+
+Redis layout (from document_store.py)
+--------------------------------------
+  <doc_name>:meta           → JSON metadata
+  <doc_name>:chunk:<i>      → JSON { sentences, vectors }
+  memory:turns              → Redis LIST of JSON turn objects
+"""
+
+import json
+import datetime
+from typing import Optional
+
 import numpy as np
-from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass
+import redis
+from sentence_transformers import SentenceTransformer
 
-from memory.history_db import retrieve_similar
-from rag.retriever import retrieve
+# ── Tunables ───────────────────────────────────────────────────────────────────
+REDIS_HOST           = "localhost"
+REDIS_PORT           = 6379
+MODEL_NAME           = "all-MiniLM-L6-v2"
+MEMORY_KEY           = "memory:turns"
 
+CONFIDENCE_THRESHOLD = 50.0    # % — hard gate; anything below is discarded
+ENTROPY_FLOOR        = 1.0     # bits — minimum acceptable window entropy
+ENTROPY_DELTA_THRESH = 0.05    # bits — ΔH below this means "no new information"
+MAX_WINDOW_SIZE      = 15      # absolute safety cap
 
-# =============================================================================
-# ORIGINAL GATE FUNCTION (PRESERVED)
-# =============================================================================
-
-def gate(query, memory_weight=0.6, doc_weight=0.4, top_k=5):
-    """
-    Original simple gating function with weighted merging.
-    
-    Args:
-        query: User query string
-        memory_weight: Weight for memory results (default: 0.6)
-        doc_weight: Weight for document results (default: 0.4)
-        top_k: Number of results to return
-        
-    Returns:
-        List of text strings from merged results
-    """
-    mem_results = retrieve_similar(query, k=top_k)
-    doc_results = retrieve(query, k=top_k)
-    
-    # Merge and score
-    merged = []
-    for m in mem_results:
-        merged.append({"source": "memory", "text": m["response"], "score": memory_weight})
-    for d in doc_results:
-        merged.append({"source": "document", "text": d, "score": doc_weight})
-    
-    # Simple heuristic scoring and sort
-    merged.sort(key=lambda x: x["score"], reverse=True)
-    return [m["text"] for m in merged[:top_k]]
+# ── Singletons ─────────────────────────────────────────────────────────────────
+r     = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+model = SentenceTransformer(MODEL_NAME)
 
 
-# =============================================================================
-# NEW ENTROPY-BASED INTELLIGENT GATING
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# CORE MATH
+# ═══════════════════════════════════════════════════════════════════════════════
 
-@dataclass
-class MemoryToken:
-    """Represents a memory segment with metadata"""
-    content: str
-    similarity_score: float
-    entropy: float
-    token_count: int
-    source: str
-    source_type: str  # 'memory' or 'document'
+def _softmax(scores: list[float]) -> np.ndarray:
+    arr = np.array(scores, dtype=np.float64)
+    arr -= arr.max()                  # numerical stability
+    e    = np.exp(arr)
+    return e / e.sum()
 
 
-def calculate_shannon_entropy(text: str) -> float:
-    """
-    Calculate Shannon entropy to measure information content/uncertainty.
-    
-    Lower entropy = more predictable/certain = higher priority
-    Higher entropy = more uncertain/random = lower priority
-    
-    Args:
-        text: Text content to analyze
-        
-    Returns:
-        Shannon entropy value
-    """
-    if not text:
-        return float('inf')
-    
-    # Character-level entropy
-    char_counts = {}
-    for char in text:
-        char_counts[char] = char_counts.get(char, 0) + 1
-    
-    total_chars = len(text)
-    entropy = 0.0
-    
-    for count in char_counts.values():
-        probability = count / total_chars
-        if probability > 0:
-            entropy -= probability * math.log2(probability)
-    
-    return entropy
-
-
-def calculate_normalized_entropy(text: str) -> float:
-    """
-    Calculate normalized Shannon entropy (0-1 range).
-    
-    Args:
-        text: Text content to analyze
-        
-    Returns:
-        Normalized entropy value between 0 and 1
-    """
-    entropy = calculate_shannon_entropy(text)
-    
-    if entropy == float('inf'):
-        return 1.0
-    
-    # Estimate based on typical character set
-    vocab_size = 256  # ASCII + extended
-    max_entropy = math.log2(vocab_size)
-    
-    if max_entropy == 0:
+def _entropy(scores: list[float]) -> float:
+    """Shannon entropy in bits over softmax-normalised confidence scores."""
+    if len(scores) < 2:
         return 0.0
-    
-    return min(entropy / max_entropy, 1.0)
+    p = _softmax(scores)
+    p = np.clip(p, 1e-12, None)
+    return float(-np.sum(p * np.log2(p)))
 
 
-def estimate_token_count(text: str) -> int:
-    """
-    Estimate token count for a text segment.
-    
-    Args:
-        text: Text to count tokens for
-        
-    Returns:
-        Estimated token count
-    """
-    # Rough estimation: ~0.75 tokens per word
-    words = len(text.split())
-    return int(words * 0.75) + 10  # Add small buffer
+def _embed(text: str) -> np.ndarray:
+    """Single embed → L2-normalised float32 (384,)."""
+    return model.encode(
+        [text], convert_to_numpy=True, normalize_embeddings=True
+    )[0].astype(np.float32)
 
 
-def intelligent_gate(
-    query: str,
-    max_tokens: int = 4096,
-    memory_top_k: int = 10,
-    doc_top_k: int = 5,
-    strategy: str = 'entropy_weighted',
-    min_similarity: float = 0.0
-) -> Dict:
+def _cosine(a: np.ndarray, b: np.ndarray) -> float:
+    return float(np.dot(a, b))        # unit vectors: dot == cosine
+
+
+def _confidence(cosine_score: float) -> float:
+    """cosine [-1,1]  →  confidence [0, 100] %"""
+    return ((cosine_score + 1.0) / 2.0) * 100.0
+
+
+def _now() -> str:
+    return datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MEMORY — write
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def remember(role: str, content: str) -> None:
+    """Persist a conversation turn with its embedding."""
+    vec  = _embed(content)
+    turn = {
+        "role"     : role,
+        "content"  : content,
+        "vector"   : vec.tolist(),
+        "timestamp": _now(),
+    }
+    r.rpush(MEMORY_KEY, json.dumps(turn))
+
+
+def clear_memory() -> None:
+    r.delete(MEMORY_KEY)
+    print("[memory] Cleared.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STAGE 1 — MEMORY GATE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def gate_memory(q_vec: np.ndarray) -> list[dict]:
     """
-    Intelligent gating with entropy-based selection.
-    
-    This is the NEW method that:
-    1. Searches memory with cosine similarity
-    2. Calculates Shannon entropy for each result
-    3. Creates context window with lowest uncertainty tokens
-    
-    Args:
-        query: User query string
-        max_tokens: Maximum tokens allowed in context window
-        memory_top_k: Number of memories to retrieve initially
-        doc_top_k: Number of documents to retrieve
-        strategy: Selection strategy ('entropy_weighted', 'lowest_entropy', 'hybrid')
-        min_similarity: Minimum similarity threshold
-        
-    Returns:
-        Dictionary containing:
-            - selected_memories: List of selected memory texts
-            - selected_documents: List of selected document texts
-            - total_tokens: Total token count
-            - metadata: Additional information about selection
+    Score all memory turns against the pre-embedded query vector.
+    Return turns with confidence >= CONFIDENCE_THRESHOLD, sorted best-first.
     """
-    # Step 1: Retrieve similar memories using cosine similarity
-    mem_results = retrieve_similar(query, k=memory_top_k)
-    doc_results = retrieve(query, k=doc_top_k)
-    
-    # Step 2: Create MemoryToken objects and calculate entropy
-    memory_tokens = []
-    
-    for idx, mem in enumerate(mem_results):
-        content = mem.get("response", "")
-        similarity = mem.get("similarity", 1.0)
-        
-        # Skip if below similarity threshold
-        if similarity < min_similarity:
+    raw_turns = r.lrange(MEMORY_KEY, 0, -1)
+    passed    = []
+
+    for raw in raw_turns:
+        turn   = json.loads(raw)
+        vec    = np.array(turn["vector"], dtype=np.float32)
+        cosine = _cosine(q_vec, vec)
+        conf   = _confidence(cosine)
+
+        if conf >= CONFIDENCE_THRESHOLD:
+            passed.append({
+                "source"    : "memory",
+                "role"      : turn["role"],
+                "content"   : turn["content"],
+                "timestamp" : turn["timestamp"],
+                "cosine"    : round(cosine, 4),
+                "confidence": round(conf, 2),
+            })
+
+    passed.sort(key=lambda x: x["confidence"], reverse=True)
+
+    print(f"[memory]  {len(raw_turns):>4} turns   →  "
+          f"{len(passed)} passed  (conf ≥ {CONFIDENCE_THRESHOLD}%)")
+    return passed
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STAGE 2 — DOCUMENT GATE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _doc_names() -> list[str]:
+    return [
+        k.replace(":meta", "")
+        for k in r.keys("*:meta")
+        if not k.startswith("memory")
+    ]
+
+
+def gate_document(
+    q_vec: np.ndarray,
+    doc_name: Optional[str] = None,
+) -> list[dict]:
+    """
+    Score every sentence in every document cluster against the query.
+    Return sentences with confidence >= CONFIDENCE_THRESHOLD, sorted best-first.
+    """
+    names   = [doc_name] if doc_name else _doc_names()
+    passed  = []
+    scanned = 0
+
+    for name in names:
+        meta_raw = r.get(f"{name}:meta")
+        if not meta_raw:
             continue
-        
-        # Calculate entropy
-        entropy = calculate_normalized_entropy(content)
-        token_count = estimate_token_count(content)
-        
-        memory_token = MemoryToken(
-            content=content,
-            similarity_score=similarity,
-            entropy=entropy,
-            token_count=token_count,
-            source=f'M{idx + 1}',
-            source_type='memory'
-        )
-        memory_tokens.append(memory_token)
-    
-    # Process documents similarly
-    doc_tokens = []
-    for idx, doc in enumerate(doc_results):
-        content = doc if isinstance(doc, str) else doc.get("text", "")
-        
-        entropy = calculate_normalized_entropy(content)
-        token_count = estimate_token_count(content)
-        
-        doc_token = MemoryToken(
-            content=content,
-            similarity_score=0.8,  # Default high score for retrieved docs
-            entropy=entropy,
-            token_count=token_count,
-            source=f'D{idx + 1}',
-            source_type='document'
-        )
-        doc_tokens.append(doc_token)
-    
-    # Step 3: Select tokens with lowest uncertainty based on strategy
-    all_tokens = memory_tokens + doc_tokens
-    
-    if strategy == 'lowest_entropy':
-        # Sort by entropy (ascending) - prefer low uncertainty
-        sorted_tokens = sorted(all_tokens, key=lambda x: x.entropy)
-    
-    elif strategy == 'entropy_weighted':
-        # Combine entropy and similarity: prefer high similarity + low entropy
-        # Score = similarity * (1 - entropy)
-        sorted_tokens = sorted(
-            all_tokens,
-            key=lambda x: x.similarity_score * (1 - x.entropy),
-            reverse=True
-        )
-    
-    elif strategy == 'hybrid':
-        # Multi-factor ranking
-        max_sim = max(t.similarity_score for t in all_tokens) if all_tokens else 1.0
-        
-        def hybrid_score(token):
-            norm_similarity = token.similarity_score / max_sim if max_sim > 0 else 0
-            certainty = 1 - token.entropy
-            # Weighted combination: 60% similarity, 40% certainty
-            return 0.6 * norm_similarity + 0.4 * certainty
-        
-        sorted_tokens = sorted(all_tokens, key=hybrid_score, reverse=True)
-    
-    else:
-        raise ValueError(f"Unknown strategy: {strategy}")
-    
-    # Select tokens that fit within context window
-    selected_tokens = []
-    current_token_count = 0
-    
-    for token in sorted_tokens:
-        if current_token_count + token.token_count <= max_tokens:
-            selected_tokens.append(token)
-            current_token_count += token.token_count
-        else:
+        meta       = json.loads(meta_raw)
+        num_chunks = meta.get("chunk_count", 0)
+
+        # Bulk-fetch all chunks in one round-trip
+        pipe = r.pipeline()
+        for i in range(num_chunks):
+            pipe.get(f"{name}:chunk:{i}")
+        raw_chunks = pipe.execute()
+
+        sent_global = 0
+        for chunk_idx, raw in enumerate(raw_chunks):
+            if raw is None:
+                continue
+            payload = json.loads(raw)
+
+            for sentence, vec_list in zip(payload["sentences"], payload["vectors"]):
+                vec    = np.array(vec_list, dtype=np.float32)
+                cosine = _cosine(q_vec, vec)
+                conf   = _confidence(cosine)
+                scanned += 1
+
+                if conf >= CONFIDENCE_THRESHOLD:
+                    passed.append({
+                        "source"        : "document",
+                        "doc_name"      : name,
+                        "chunk_index"   : chunk_idx,
+                        "sentence_index": sent_global,
+                        "cosine"        : round(cosine, 4),
+                        "confidence"    : round(conf, 2),
+                        "sentence"      : sentence,
+                    })
+                sent_global += 1
+
+        # Update access metadata
+        meta["access_count"] += 1
+        meta["last_accessed"] = _now()
+        r.set(f"{name}:meta", json.dumps(meta))
+
+    passed.sort(key=lambda x: x["confidence"], reverse=True)
+
+    print(f"[docs]    {scanned:>4} sentences →  "
+          f"{len(passed)} passed  (conf ≥ {CONFIDENCE_THRESHOLD}%)")
+    return passed
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STAGE 3 — ENTROPY-GUIDED MINIMAL WINDOW
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def build_context_window(
+    candidates: list[dict],           # merged, sorted by confidence desc
+    entropy_floor: float = ENTROPY_FLOOR,
+    entropy_delta: float = ENTROPY_DELTA_THRESH,
+    max_size: int = MAX_WINDOW_SIZE,
+) -> dict:
+    """
+    Build the smallest context window that:
+      • Keeps Shannon entropy >= entropy_floor  (information diversity)
+      • Stops adding items once ΔH < entropy_delta  (plateau = redundancy)
+      • Prunes backward: removes the weakest item if H stays above floor
+
+    Returns
+    -------
+    {
+        window         : list[dict],    ← final minimal context items
+        window_entropy : float,         ← bits
+        entropy_floor  : float,
+        is_stable      : bool,
+        stats          : { … }
+    }
+    """
+    # ── Phase A: Greedy forward pass ─────────────────────────────────────────
+    window        = []
+    scores        = []
+    prev_H        = 0.0
+    stopped_early = False
+
+    for item in candidates[:max_size]:
+        trial_scores = scores + [item["confidence"]]
+        trial_H      = _entropy(trial_scores)
+        delta_H      = trial_H - prev_H
+
+        # Stop if we've hit the entropy plateau (new item adds nothing)
+        if len(window) >= 2 and delta_H < entropy_delta:
+            stopped_early = True
             break
-    
-    # Separate memories and documents
-    selected_memories = [t for t in selected_tokens if t.source_type == 'memory']
-    selected_documents = [t for t in selected_tokens if t.source_type == 'document']
-    
+
+        window.append(item)
+        scores.append(item["confidence"])
+        prev_H = trial_H
+
+    current_H = _entropy(scores)
+
+    # ── Phase B: Backward prune ───────────────────────────────────────────────
+    # Remove weakest items (end of list = lowest confidence) if H stays stable.
+    pruned = 0
+    while len(window) > 1:
+        trial_scores = scores[:-1]
+        trial_H      = _entropy(trial_scores)
+
+        if trial_H >= entropy_floor:
+            window.pop()
+            scores.pop()
+            current_H = trial_H
+            pruned   += 1
+        else:
+            break                    # pruning any further would destabilise H
+
+    is_stable  = current_H >= entropy_floor or len(window) <= 2
+    mem_count  = sum(1 for i in window if i["source"] == "memory")
+    doc_count  = sum(1 for i in window if i["source"] == "document")
+
+    print(
+        f"[window]  size={len(window)}  H={current_H:.3f} bits  "
+        f"floor={entropy_floor} bits  stable={'✓' if is_stable else '✗'}  "
+        f"pruned={pruned}  early_stop={'✓' if stopped_early else '✗'}"
+    )
+
     return {
-        'selected_memories': [m.content for m in selected_memories],
-        'selected_documents': [d.content for d in selected_documents],
-        'total_tokens': current_token_count,
-        'metadata': {
-            'memory_count': len(selected_memories),
-            'document_count': len(selected_documents),
-            'avg_memory_entropy': np.mean([m.entropy for m in selected_memories]) if selected_memories else 0,
-            'avg_memory_similarity': np.mean([m.similarity_score for m in selected_memories]) if selected_memories else 0,
-            'strategy': strategy,
-            'memory_details': [
-                {
-                    'source': m.source,
-                    'similarity': m.similarity_score,
-                    'entropy': m.entropy,
-                    'tokens': m.token_count
-                }
-                for m in selected_memories
-            ]
-        }
+        "window"         : window,
+        "window_entropy" : round(current_H, 4),
+        "entropy_floor"  : entropy_floor,
+        "is_stable"      : is_stable,
+        "stats": {
+            "candidates_in"  : len(candidates),
+            "window_size"    : len(window),
+            "pruned"         : pruned,
+            "early_stop"     : stopped_early,
+            "memory_count"   : mem_count,
+            "doc_count"      : doc_count,
+        },
     }
 
 
-def format_context_window(result: Dict, include_metadata: bool = False) -> str:
-    """
-    Format the intelligent_gate result into a context string for LLM.
-    
-    Args:
-        result: Output from intelligent_gate()
-        include_metadata: Whether to include metadata in output
-        
-    Returns:
-        Formatted context string
-    """
-    parts = []
-    
-    # Add memories
-    if result['selected_memories']:
-        parts.append("=== RELEVANT CHAT HISTORY ===\n")
-        for idx, memory in enumerate(result['selected_memories'], 1):
-            if include_metadata:
-                mem_meta = result['metadata']['memory_details'][idx - 1]
-                parts.append(
-                    f"[Memory {idx}] (Similarity: {mem_meta['similarity']:.3f}, "
-                    f"Certainty: {1 - mem_meta['entropy']:.3f})\n"
-                )
-            parts.append(f"{memory}\n")
-    
-    # Add documents
-    if result['selected_documents']:
-        parts.append("\n=== EXTERNAL DOCUMENTS ===\n")
-        for idx, doc in enumerate(result['selected_documents'], 1):
-            parts.append(f"[Document {idx}] {doc}\n")
-    
-    return "\n".join(parts)
+# ═══════════════════════════════════════════════════════════════════════════════
+# MAIN ENTRY POINT
+# ═══════════════════════════════════════════════════════════════════════════════
 
-
-# =============================================================================
-# CONVENIENCE FUNCTIONS
-# =============================================================================
-
-def gate_with_entropy(
+def gate(
     query: str,
-    max_tokens: int = 4096,
-    strategy: str = 'entropy_weighted'
-) -> List[str]:
+    doc_name: Optional[str] = None,
+    entropy_floor: float = ENTROPY_FLOOR,
+    entropy_delta: float = ENTROPY_DELTA_THRESH,
+    max_size: int = MAX_WINDOW_SIZE,
+) -> dict:
     """
-    Simplified interface for entropy-based gating that returns just the texts.
-    Similar signature to original gate() but with entropy selection.
-    
-    Args:
-        query: User query string
-        max_tokens: Maximum tokens in context
-        strategy: Selection strategy
-        
-    Returns:
-        List of selected text strings (memories + documents)
-    """
-    result = intelligent_gate(query, max_tokens=max_tokens, strategy=strategy)
-    return result['selected_memories'] + result['selected_documents']
+    Full gater: embed once → gate memory → gate docs → build minimal window.
 
+    Parameters
+    ----------
+    query         : user's current query
+    doc_name      : restrict doc search to one cluster  (None = all)
+    entropy_floor : minimum H(bits) the window must sustain after pruning
+    entropy_delta : ΔH below this = plateau, stop adding
+    max_size      : absolute cap before entropy logic runs
+
+    Returns
+    -------
+    {
+        query, window, window_entropy, entropy_floor,
+        is_stable, stats
+    }
+    """
+    print(f'\n{"═"*62}')
+    print(f'  query : "{query}"')
+    print(f'{"═"*62}')
+
+    # Single embed — shared by both gates
+    q_vec = _embed(query)
+
+    memory_items = gate_memory(q_vec)
+    doc_items    = gate_document(q_vec, doc_name=doc_name)
+
+    # Merge and re-sort by confidence
+    candidates = sorted(
+        memory_items + doc_items,
+        key=lambda x: x["confidence"],
+        reverse=True,
+    )
+
+    context          = build_context_window(
+                            candidates,
+                            entropy_floor=entropy_floor,
+                            entropy_delta=entropy_delta,
+                            max_size=max_size,
+                       )
+    context["query"] = query
+    return context
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PROMPT BUILDER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def build_prompt(context: dict) -> str:
+    """Format the minimal window into a plain-text LLM context block."""
+    h       = context["window_entropy"]
+    stable  = "stable" if context["is_stable"] else "unstable"
+    s       = context["stats"]
+
+    lines = [
+        f"=== Context  [H={h:.3f} bits | {stable} | "
+        f"items={s['window_size']} | mem={s['memory_count']} doc={s['doc_count']}] ===",
+        "",
+    ]
+
+    mem_items = [i for i in context["window"] if i["source"] == "memory"]
+    doc_items = [i for i in context["window"] if i["source"] == "document"]
+
+    if mem_items:
+        lines.append("── Memory ───────────────────────────────────────────────")
+        for item in mem_items:
+            lines.append(
+                f"[{item['role'].upper()}  {item['confidence']}%]  {item['content']}"
+            )
+        lines.append("")
+
+    if doc_items:
+        lines.append("── Documents ────────────────────────────────────────────")
+        for item in doc_items:
+            lines.append(
+                f"[{item['doc_name']} | chunk {item['chunk_index']} | {item['confidence']}%]"
+            )
+            lines.append(item["sentence"])
+        lines.append("")
+
+    lines.append("── Query ────────────────────────────────────────────────")
+    lines.append(context["query"])
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DEMO
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    # Seed memory with a mix of relevant and irrelevant turns
+    remember("user",      "What are the payment terms in the contract?")
+    remember("assistant", "The contract states net-30 payment terms.")
+    remember("user",      "Does it mention penalties for late payment?")
+    remember("assistant", "Yes, 1.5% monthly interest applies after the due date.")
+    remember("user",      "What is the weather like today?")       # off-topic
+    remember("assistant", "I am not sure about the current weather.") # off-topic
+
+    query   = "What happens if payment is late?"
+    context = gate(query)
+
+    print("\n── Window Items ─────────────────────────────────────────")
+    for item in context["window"]:
+        text = item.get("content") or item.get("sentence", "")
+        print(f"  [{item['source']:<8} {item['confidence']:5.1f}%]  {text[:90]}")
+
+    print(f"\n── Stats ────────────────────────────────────────────────")
+    print(json.dumps(context["stats"], indent=2))
+
+    print(f"\n── Prompt ───────────────────────────────────────────────")
+    print(build_prompt(context))
