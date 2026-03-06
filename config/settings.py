@@ -9,5 +9,5 @@ DOC_STORE_PATH = "rag_storage"
 
 # Model for inference (OpenAI, Ollama, etc.)
 LLM_PROVIDER = "lmstudio"
-LLM_MODEL = "liquid/lfm2-1.2b"
+LLM_MODEL = "lfm2.5-1.2b-thinking"
 
