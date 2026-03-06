@@ -1,0 +1,7 @@
+redis
+sentence-transformers
+numpy
+PyPDF2
+openai
+mcp
+tiktoken
