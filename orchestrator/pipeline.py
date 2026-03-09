@@ -12,7 +12,7 @@ from app_io.output_handler import process_output
 
 from utils.embedding import embed
 
-from memory_storage.storage import retrieve_memory, remember_exchange
+from memory_storage.storage import retrieve_memory, remember_exchange, update_memory_usefulness
 from doc_storage.document_store import retrieve_all as retrieve_docs_from_store
 
 from gating.token_gater import build_context_window
@@ -164,23 +164,39 @@ def run_pipeline(user_query: str, gating_mode: str = "entropy", tracer=None) -> 
         "error":             llm_response.get("error", None),
     }, status="error" if llm_response.get("error") else "ok")
 
-    # ── 7. Store Memory ───────────────────────────────────────────────────────
+    # ── 7. Usefulness Feedback ────────────────────────────────────────────────
+    response_text = llm_response["response_text"]
+    used_contents = [
+        item.get("content") or item.get("sentence", "")
+        for item in selected_items
+        if (item.get("content") or item.get("sentence", "")).strip().lower()
+        in response_text.lower()
+    ]
+    update_memory_usefulness(used_contents)
+
+    trace(7, "Usefulness Feedback", {
+        "retrieved_items":  len(selected_items),
+        "used_in_response": len(used_contents),
+        "used_previews":    [c[:60] for c in used_contents[:3]],
+    })
+
+    # ── 8. Store Memory ───────────────────────────────────────────────────────
     remember_exchange(query, llm_response["response_text"])
 
-    trace(7, "Memory Storage", {
+    trace(8, "Memory Storage", {
         "stored_as":         "single exchange unit",
         "user_preview":      query[:80],
         "assistant_preview": llm_response["response_text"][:80],
     })
 
-    # ── 8. Output Formatting ──────────────────────────────────────────────────
+    # ── 9. Output Formatting ──────────────────────────────────────────────────
     output = process_output(
         gated_response     = llm_response,
         non_gated_response = llm_response,
         gating_stats       = context.get("stats", {}),
     )
 
-    trace(8, "Output Ready", {
+    trace(9, "Output Ready", {
         "total_pipeline_sec": round(time.time() - start_time, 3),
         "gating_mode":        gating_mode,
         "response_chars":     len(llm_response["response_text"]),

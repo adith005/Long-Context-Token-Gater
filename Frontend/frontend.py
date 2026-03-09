@@ -10,6 +10,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from orchestrator.pipeline import run_pipeline
 from doc_storage.document_store import ingest, list_registry
+from memory_storage.storage import dedup_memory, expire_stale_memory
 from needlebench import run_benchmark, NEEDLES, HAYSTACK_SIZES
 from tracer import PipelineTracer
 
@@ -49,7 +50,41 @@ if uploaded_file is not None:
     except Exception as e:
         st.sidebar.error(f"Error: {e}")
 
-# ── Document Registry ──────────────────────────────────────────────────────────
+# ── Memory Deduplication ──────────────────────────────────────────────────────
+st.sidebar.divider()
+st.sidebar.header("🧹 Memory Dedup")
+dedup_threshold = st.sidebar.slider(
+    "Merge threshold", min_value=0.70, max_value=0.99,
+    value=0.85, step=0.01,
+    help="Entries with cosine similarity above this are merged. "
+         "0.97+ = exact duplicates only. 0.85 = same topic, different wording."
+)
+if st.sidebar.button("Run Dedup Sweep"):
+    with st.sidebar:
+        with st.spinner("Scanning memory…"):
+            stats = dedup_memory(threshold=dedup_threshold)
+        st.success(
+            f"Done — scanned {stats['scanned']}, "
+            f"merged {stats['merged']}, "
+            f"deleted {stats['deleted']}, "
+            f"{stats['remaining']} remaining"
+        )
+
+st.sidebar.divider()
+st.sidebar.header("⏳ Expire Stale Memories")
+ttl_days = st.sidebar.number_input(
+    "Max age (days)", min_value=1, max_value=365, value=30,
+    help="Entries older than this AND below the usefulness floor will be deleted."
+)
+ttl_usefulness = st.sidebar.slider(
+    "Usefulness floor", min_value=0.1, max_value=0.9, value=0.3, step=0.05,
+    help="Entries with usefulness below this are candidates for expiry."
+)
+if st.sidebar.button("Run Expiry"):
+    with st.sidebar:
+        with st.spinner("Expiring stale memories…"):
+            estats = expire_stale_memory(ttl_days=ttl_days, usefulness_floor=ttl_usefulness)
+        st.success(f"Done — scanned {estats['scanned']}, expired {estats['expired']}")
 st.sidebar.divider()
 st.sidebar.header("📚 Ingested Documents")
 

@@ -46,13 +46,58 @@ from gating.token_gater import build_context_window
 from prompt_creator.builder import build_prompt
 from llm_handler.handler import call_llm
 from app_io.output_handler import process_output
-from locomo_adapter import load_locomo_needles, load_locomo_fillers
+from evaluation.bm25_retriever import bm25_retrieve
+from evaluation.metrics import (
+    compute_retrieval_metrics,
+    compute_all_metrics,
+    token_compression_ratio,
+    window_reduction_rate,
+    answer_f1,
+    print_metrics_table,
+)
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # NEEDLE DATASET
 # ═════════════════════════════════════════════════════════════════════════════
 
-NEEDLES     = load_locomo_needles("locomo10.json")
+NEEDLES = [
+    {
+        "id":              "nb_001",
+        "fact":            "The secret launch code for Project Helios is ZETA-7742-OMEGA.",
+        "question":        "What is the secret launch code for Project Helios?",
+        "answer_keywords": ["ZETA-7742-OMEGA", "ZETA", "7742"],
+        "depth":           "shallow",
+    },
+    {
+        "id":              "nb_002",
+        "fact":            "Dr. Amara Chen discovered the protein folding shortcut in March 1987.",
+        "question":        "Who discovered the protein folding shortcut and when?",
+        "answer_keywords": ["Amara Chen", "Chen", "1987", "March"],
+        "depth":           "middle",
+    },
+    {
+        "id":              "nb_003",
+        "fact":            "The maximum safe operating temperature for Reactor 4-B is 847 degrees Celsius.",
+        "question":        "What is the maximum safe operating temperature for Reactor 4-B?",
+        "answer_keywords": ["847", "degrees", "Celsius"],
+        "depth":           "deep",
+    },
+    {
+        "id":              "nb_004",
+        "fact":            "Agent Valeria Moreno uses the alias 'Nightingale' during field operations.",
+        "question":        "What alias does Agent Valeria Moreno use in the field?",
+        "answer_keywords": ["Nightingale", "nightingale"],
+        "depth":           "middle",
+    },
+    {
+        "id":              "nb_005",
+        "fact":            "The encryption passphrase for Vault 9 is: broken-mirror-cascade-41.",
+        "question":        "What is the encryption passphrase for Vault 9?",
+        "answer_keywords": ["broken-mirror-cascade-41", "broken-mirror", "cascade-41"],
+        "depth":           "deep",
+    },
+]
 
 HAYSTACK_SIZES = {
     "short":  15,
@@ -60,7 +105,39 @@ HAYSTACK_SIZES = {
     "long":   80,
 }
 
-FILLER_POOL = load_locomo_fillers("locomo10.json")
+FILLER_POOL = [
+    "The committee reviewed all submitted proposals before the final vote.",
+    "Annual rainfall in the northern region averaged 340mm over the last decade.",
+    "Section 4.2 of the regulation requires written consent from all parties.",
+    "The bridge construction was completed six months ahead of schedule.",
+    "Laboratory samples must be stored at minus twenty degrees Celsius.",
+    "The quarterly report showed a seven percent increase in operating costs.",
+    "All vehicles must undergo inspection before crossing the border checkpoint.",
+    "The archaeological dig revealed pottery fragments dating to the 3rd century.",
+    "Network latency must remain below fifty milliseconds for real-time use.",
+    "Staff members are required to complete annual safety training by December.",
+    "The satellite achieved stable orbit at an altitude of 420 kilometres.",
+    "Water quality tests indicated elevated phosphate levels in the eastern basin.",
+    "The merger agreement was signed by both boards on the fifteenth of June.",
+    "Wind turbine efficiency drops significantly when temperatures fall below zero.",
+    "Historical records show the town was founded by settlers in 1802.",
+    "The clinical trial enrolled 1,200 participants across five medical centres.",
+    "Emergency evacuation routes must be posted in all public-facing corridors.",
+    "The new firmware update resolves a critical authentication vulnerability.",
+    "Peak electricity demand typically occurs between 6 and 9 pm on weekdays.",
+    "Customs declarations are mandatory for all shipments exceeding 1,000 euros.",
+    "The compiler optimisation reduced average build times by thirty percent.",
+    "All patient records are encrypted using AES-256 before storage.",
+    "The telescope's primary mirror measures 6.5 metres in diameter.",
+    "Training datasets were balanced to ensure equal class representation.",
+    "The treaty was ratified by twelve member states within the first year.",
+    "Soil samples from grid sector C showed unusually high nitrogen content.",
+    "The pilot programme was extended for another six months pending review.",
+    "Revenue from subscriptions now accounts for sixty percent of total income.",
+    "The algorithm's time complexity is O(n log n) in the average case.",
+    "All outbound communications are logged and retained for 90 days.",
+]
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # HAYSTACK BUILDER
@@ -89,11 +166,18 @@ def build_haystack(needle: dict, size: str = "medium", seed: int = 42) -> tuple:
 # CANDIDATE BUILDER
 # ═════════════════════════════════════════════════════════════════════════════
 
-def build_candidates(sentences: list, query: str) -> list:
+def build_candidates(sentences: list, query: str, mode: str = "embedding") -> list:
     """
-    Embed haystack sentences and score against query.
-    Produces the same candidate dict shape as pipeline.py step 3.
+    Build candidates from haystack sentences.
+
+    mode="embedding" uses cosine similarity (default for entropy/simple/none).
+    mode="bm25"      uses BM25-Okapi scores (IR baseline).
+
+    Both return the same candidate dict shape.
     """
+    if mode == "bm25":
+        return bm25_retrieve(sentences, query)
+
     q_vec  = embed(query)
     q_norm = np.linalg.norm(q_vec)
 
@@ -119,13 +203,24 @@ def build_candidates(sentences: list, query: str) -> list:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def gate(candidates: list, mode: str) -> tuple:
+    """
+    Apply gating strategy to candidate list.
+
+    Modes
+    -----
+    entropy  : entropy-guided minimal window  (proposed method)
+    simple   : top-15 by confidence          (simple baseline)
+    none     : all candidates                (no gating baseline)
+    bm25     : top-15 by BM25 score          (IR baseline — candidates
+               must already be BM25-scored via build_candidates(mode="bm25"))
+    """
     if mode == "entropy":
         result = build_context_window(candidates)
         return result["window"], result["stats"]
-    elif mode == "simple":
+    elif mode in ("simple", "bm25"):
         selected = candidates[:15]
-        return selected, {"strategy": "simple", "window_size": len(selected)}
-    else:
+        return selected, {"strategy": mode, "window_size": len(selected)}
+    else:   # none
         return candidates, {"strategy": "none", "window_size": len(candidates)}
 
 
@@ -168,9 +263,15 @@ class TestResult:
     latency_sec:       float
     window_size:       int
     candidates_in:     int
-    gating_stats:      dict = field(default_factory=dict)
-    response_text:     str  = ""
-    error:             str  = ""
+    gating_stats:      dict  = field(default_factory=dict)
+    response_text:     str   = ""
+    error:             str   = ""
+
+    # Extended metrics (computed post-hoc by _agg / compute_retrieval_metrics)
+    answer_keywords:   list  = field(default_factory=list)
+    answer_f1:         float = 0.0
+    window_reduction:  float = 0.0   # WRR = 1 - window_size/candidates_in
+    seed:              int   = 42
 
     def to_pipeline_output(self) -> dict:
         """
@@ -209,23 +310,30 @@ def run_single(
 ) -> TestResult:
     """
     One needle × haystack × gating_mode.
-    Uses gating/token_gater, prompt_creator/builder, llm_handler/handler
-    — the same modules as pipeline.py.
+
+    gating_mode options
+    -------------------
+    entropy  — entropy-guided window (proposed method)
+    simple   — top-15 cosine-similarity baseline
+    none     — all candidates, no gating
+    bm25     — BM25-Okapi retrieval + top-15 selection (IR baseline)
     """
     sentences, _ = build_haystack(needle, haystack_size, seed)
     query = needle["question"]
 
     t0 = time.time()
 
-    candidates    = build_candidates(sentences, query)
-    window, stats = gate(candidates, gating_mode)
-    recalled      = needle_in_window(needle["fact"], window)
-    prompt        = build_prompt(window, query)
-    prompt_tokens = estimate_tokens(prompt)
+    retrieval_mode = "bm25" if gating_mode == "bm25" else "embedding"
+    candidates     = build_candidates(sentences, query, mode=retrieval_mode)
+    window, stats  = gate(candidates, gating_mode)
+    recalled       = needle_in_window(needle["fact"], window)
+    prompt         = build_prompt(window, query)
+    prompt_tokens  = estimate_tokens(prompt)
 
     response_text     = ""
     completion_tokens = 0
     answer_score      = 0.0
+    a_f1              = 0.0
     error             = ""
 
     if call_llm_flag:
@@ -235,11 +343,14 @@ def run_single(
             prompt_tokens     = llm_resp.get("prompt_tokens") or prompt_tokens
             completion_tokens = llm_resp.get("completion_tokens", 0)
             answer_score      = score_answer(response_text, needle["answer_keywords"])
+            a_f1              = answer_f1(response_text, needle["answer_keywords"])
         except Exception as e:
             error        = str(e)
             answer_score = 0.0
     else:
         answer_score = 1.0 if recalled else 0.0
+
+    wrr = window_reduction_rate(len(window), len(candidates))
 
     return TestResult(
         needle_id         = needle["id"],
@@ -256,6 +367,10 @@ def run_single(
         gating_stats      = stats,
         response_text     = response_text[:300] if response_text else "",
         error             = error,
+        answer_keywords   = needle["answer_keywords"],
+        answer_f1         = a_f1,
+        window_reduction  = wrr,
+        seed              = seed,
     )
 
 
@@ -269,22 +384,31 @@ def run_benchmark(
     call_llm_flag:  bool = False,
     output_path:    str  = None,
     verbose:        bool = True,
+    seed:           int  = 42,
     progress_cb          = None,   # callable(current, total, result) for Streamlit
 ) -> dict:
     """
     Run all needle × mode × haystack combinations.
 
+    Modes
+    -----
+    "entropy"  entropy-guided gating      (proposed method)
+    "simple"   top-15 cosine similarity   (simple baseline)
+    "none"     no gating, all candidates  (no-gating baseline)
+    "bm25"     BM25 retrieval + top-15    (IR baseline)
+
     Returns
     -------
     {
-        "summary":     { mode: { overall, by_haystack, by_depth } },
-        "all_results": [ TestResult as dict, ... ]
+        "summary":       { mode: { overall, by_haystack, by_depth } },
+        "all_results":   [ TestResult as dict, ... ],
+        "run_metadata":  { seed, modes, haystack_sizes, timestamp, n_needles }
     }
 
-    progress_cb(current, total, result) is called after each test — use this
-    to drive a Streamlit st.progress() bar in real time.
+    progress_cb(current, total, result) is called after each test for
+    Streamlit progress bar.
     """
-    modes          = modes          or ["entropy", "simple", "none"]
+    modes          = modes          or ["entropy", "simple", "none", "bm25"]
     haystack_sizes = haystack_sizes or ["short", "medium", "long"]
 
     all_results = []
@@ -298,7 +422,7 @@ def run_benchmark(
         for h_size in haystack_sizes:
             for needle in NEEDLES:
                 idx += 1
-                result = run_single(needle, h_size, mode, call_llm_flag)
+                result = run_single(needle, h_size, mode, call_llm_flag, seed=seed)
                 all_results.append(result)
 
                 if verbose:
@@ -315,6 +439,14 @@ def run_benchmark(
     output = {
         "summary":     summary,
         "all_results": [asdict(r) for r in all_results],
+        "run_metadata": {
+            "seed":          seed,
+            "modes":         modes,
+            "haystack_sizes":haystack_sizes,
+            "n_needles":     len(NEEDLES),
+            "call_llm":      call_llm_flag,
+            "timestamp":     time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        },
     }
 
     if output_path:
@@ -341,20 +473,62 @@ def _aggregate(results, modes, haystack_sizes) -> dict:
             "by_depth":    {d: _agg([r for r in mr if r.depth == d])
                             for d in ["shallow", "middle", "deep"]},
         }
+
+    # ── Add TCR relative to "none" baseline ───────────────────────────────────
+    baseline_tokens = summary.get("none", {}).get("overall", {}).get("avg_prompt_tokens", 0)
+    for mode in modes:
+        for scope in [summary[mode]["overall"]] +                      list(summary[mode]["by_haystack"].values()) +                      list(summary[mode]["by_depth"].values()):
+            mt = scope.get("avg_prompt_tokens", 0)
+            scope["token_compression_ratio"] = token_compression_ratio(mt, baseline_tokens)
+
     return summary
 
 
 def _agg(results) -> dict:
+    """
+    Aggregate metrics over a list of TestResult objects.
+    Computes all standard IR and efficiency metrics for the paper.
+    """
     if not results:
         return {}
     n = len(results)
+
+    # ── Recall & MRR ──────────────────────────────────────────────────────
+    recalled_n = sum(r.needle_recalled for r in results)
+    # MRR: 1/rank for recalled items (rank=1 since we only store recalled bool)
+    mrr        = recalled_n / n   # equivalent to recall when rank is binary
+
+    # ── NDCG@5 ────────────────────────────────────────────────────────────
+    import math
+    ndcg_vals = []
+    for r in results:
+        rel = 1 if r.needle_recalled else 0
+        dcg = rel / math.log2(2)    # rank-1 position
+        idcg = 1.0 / math.log2(2)
+        ndcg_vals.append(dcg / idcg)
+    avg_ndcg = sum(ndcg_vals) / n
+
+    # ── Token compression ratio vs "none" mode ─────────────────────────
+    # TCR computed at summary level by run_benchmark after all modes run.
+    avg_tokens = round(sum(r.prompt_tokens   for r in results) / n, 1)
+    avg_window = round(sum(r.window_size     for r in results) / n, 2)
+    avg_cands  = round(sum(r.candidates_in   for r in results) / n, 2)
+    avg_wrr    = round(sum(r.window_reduction for r in results) / n, 4)
+    avg_f1     = round(sum(r.answer_f1        for r in results) / n, 4)
+
     return {
-        "n":                 n,
-        "recall_rate":       round(sum(r.needle_recalled for r in results) / n, 4),
-        "avg_answer_score":  round(sum(r.answer_score    for r in results) / n, 4),
-        "avg_prompt_tokens": round(sum(r.prompt_tokens   for r in results) / n, 1),
-        "avg_window_size":   round(sum(r.window_size     for r in results) / n, 2),
-        "avg_latency_sec":   round(sum(r.latency_sec     for r in results) / n, 3),
+        "n":                    n,
+        "recall_rate":          round(recalled_n / n, 4),
+        "mrr":                  round(mrr, 4),
+        "avg_ndcg":             round(avg_ndcg, 4),
+        "avg_answer_score":     round(sum(r.answer_score for r in results) / n, 4),
+        "avg_answer_f1":        avg_f1,
+        "avg_prompt_tokens":    avg_tokens,
+        "avg_window_size":      avg_window,
+        "avg_candidates_in":    avg_cands,
+        "avg_window_reduction": avg_wrr,
+        "avg_latency_sec":      round(sum(r.latency_sec for r in results) / n, 3),
+        "token_compression_ratio": 1.0,   # filled in by _add_tcr after all modes run
     }
 
 
@@ -385,36 +559,61 @@ def _print_row(idx, total, r: TestResult):
 
 
 def _print_summary(summary: dict, modes, haystack_sizes):
-    print(f"\n{'='*64}")
+    W = 80
+    print(f"\n{'='*W}")
     print(f"  RESULTS SUMMARY")
-    print(f"{'='*64}")
+    print(f"{'='*W}")
+
+    # ── Overall table ─────────────────────────────────────────────────────────
     print(f"\n  -- Overall --")
-    print(f"  {'Mode':<10}  {'Recall':>8}  {'Score':>8}  {'Tokens':>8}  {'WinSz':>6}")
-    print(f"  {'-'*52}")
+    hdr = f"  {'Mode':<10}  {'Recall':>7}  {'MRR':>7}  {'NDCG':>7}  {'AnsF1':>7}  {'Tokens':>7}  {'WinSz':>6}  {'WRR':>6}  {'TCR':>6}"
+    print(hdr)
+    print(f"  {'-'*(len(hdr)-2)}")
     for mode in modes:
         s = summary[mode]["overall"]
-        print(f"  {mode:<10}  {s['recall_rate']:>8.1%}  {s['avg_answer_score']:>8.3f}"
-              f"  {s['avg_prompt_tokens']:>8.0f}  {s['avg_window_size']:>6.1f}")
+        print(
+            f"  {mode:<10}"
+            f"  {s.get('recall_rate',0):>7.4f}"
+            f"  {s.get('mrr',0):>7.4f}"
+            f"  {s.get('avg_ndcg',0):>7.4f}"
+            f"  {s.get('avg_answer_f1',0):>7.4f}"
+            f"  {s.get('avg_prompt_tokens',0):>7.0f}"
+            f"  {s.get('avg_window_size',0):>6.1f}"
+            f"  {s.get('avg_window_reduction',0):>6.4f}"
+            f"  {s.get('token_compression_ratio',1):>6.4f}"
+        )
 
-    print(f"\n  -- Recall by Haystack Size --")
+    # ── Recall by haystack ────────────────────────────────────────────────────
+    print(f"\n  -- Recall@5 by Haystack Size --")
     print(f"  {'Mode':<10}" + "".join(f"  {h:>8}" for h in haystack_sizes))
     for mode in modes:
         row = f"  {mode:<10}"
         for h in haystack_sizes:
             r = summary[mode]["by_haystack"].get(h, {}).get("recall_rate", 0)
-            row += f"  {r:>8.1%}"
+            row += f"  {r:>8.4f}"
         print(row)
 
-    print(f"\n  -- Token Cost by Haystack Size --")
+    # ── TCR by haystack ───────────────────────────────────────────────────────
+    print(f"\n  -- Token Compression Ratio by Haystack Size --")
     print(f"  {'Mode':<10}" + "".join(f"  {h:>8}" for h in haystack_sizes))
     for mode in modes:
         row = f"  {mode:<10}"
         for h in haystack_sizes:
-            t = summary[mode]["by_haystack"].get(h, {}).get("avg_prompt_tokens", 0)
-            row += f"  {t:>8.0f}"
+            t = summary[mode]["by_haystack"].get(h, {}).get("token_compression_ratio", 1)
+            row += f"  {t:>8.4f}"
         print(row)
 
-    print(f"\n{'='*64}\n")
+    # ── Recall by depth ───────────────────────────────────────────────────────
+    print(f"\n  -- Recall@5 by Depth --")
+    print(f"  {'Mode':<10}" + "".join(f"  {d:>9}" for d in ["shallow","middle","deep"]))
+    for mode in modes:
+        row = f"  {mode:<10}"
+        for d in ["shallow", "middle", "deep"]:
+            r = summary[mode]["by_depth"].get(d, {}).get("recall_rate", 0)
+            row += f"  {r:>9.4f}"
+        print(row)
+
+    print(f"\n{'='*W}\n")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -423,12 +622,14 @@ def _print_summary(summary: dict, modes, haystack_sizes):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="NeedleBench for Token Gater")
-    parser.add_argument("--mode",     nargs="+", default=["entropy", "simple", "none"],
-                        choices=["entropy", "simple", "none"])
+    parser.add_argument("--mode",     nargs="+", default=["entropy", "simple", "none", "bm25"],
+                        choices=["entropy", "simple", "none", "bm25"])
     parser.add_argument("--haystack", nargs="+", default=["short", "medium", "long"],
                         choices=["short", "medium", "long"])
     parser.add_argument("--llm",      action="store_true",
                         help="Real LLM calls (requires LM Studio on localhost:1234)")
+    parser.add_argument("--seed",     type=int, default=42,
+                        help="Random seed for haystack construction (default: 42)")
     parser.add_argument("--output",   default="needlebench_results.json")
     parser.add_argument("--quiet",    action="store_true")
     args = parser.parse_args()
@@ -437,6 +638,7 @@ if __name__ == "__main__":
         modes          = args.mode,
         haystack_sizes = args.haystack,
         call_llm_flag  = args.llm,
+        seed           = args.seed,
         output_path    = args.output,
         verbose        = not args.quiet,
     )
