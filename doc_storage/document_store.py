@@ -1,29 +1,36 @@
 """
-Document Store — Redis
-======================
+Document Store — Redis + JSON
+==============================
 
 Pipeline (strict order):
-  1. Load   : read every file from a folder path
-  2. Embed  : encode full text with all-MiniLM-L6-v2  →  embedding matrix
-  3. Chunk  : split the embedding matrix into fixed-size chunks
-  4. Store  : push chunks into Redis under a cluster named after the document
-  5. Meta   : store created_at + access_count alongside the cluster
-  6. Retrieve: semantic similarity search against a user query
+  1. Load      : read file(s) — .pdf / .txt / .md
+  2. Persist   : save full sentences as a JSON file on disk
+  3. Summarise : build an extractive summary (first 5 sentences)
+  4. Registry  : store { filename, summary, json_path, sentence_count }
+                 in Redis under  doc:registry:<doc_name>
+  5. Embed     : encode sentences with all-MiniLM-L6-v2
+  6. Chunk     : split embedding matrix into fixed-size chunks
+  7. Store     : push chunks into Redis  <doc_name>:chunk:N
+  8. Meta      : store cluster metadata  <doc_name>:meta
+  9. Retrieve  : semantic similarity search
 
 Redis layout
 ────────────
-  <doc_name>:meta          →  JSON  { created_at, access_count, last_accessed,
-                                      chunk_count, total_sentences, model }
-  <doc_name>:chunk:0       →  JSON  { sentences: [...], vectors: [[...], ...] }
-  <doc_name>:chunk:1       →  JSON  { … }
+  doc:registry:<doc_name>   →  JSON  { doc_name, original_filename,
+                                       summary, json_path, sentence_count,
+                                       ingested_at }
+  <doc_name>:meta           →  JSON  { created_at, access_count, … }
+  <doc_name>:chunk:0        →  JSON  { sentences: […], vectors: [[…], …] }
   …
 
-Install
-───────
-  pip install redis sentence-transformers pypdf numpy
+Disk layout
+───────────
+  doc_storage/json_store/<doc_name>.json
+      { doc_name, original_filename, ingested_at, sentences: […] }
 """
 
 import os
+import re
 import json
 import datetime
 from typing import Optional
@@ -32,14 +39,16 @@ import numpy as np
 import redis
 from pypdf import PdfReader
 
-from config.settings import REDIS_HOST, REDIS_PORT, REDIS_DB
+from config.settings import REDIS_HOST, REDIS_PORT, REDIS_DB, DOC_JSON_PATH
 from utils.embedding import embed, MODEL_NAME
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-SENTENCES_PER_CHUNK = 10          # how many sentences (embeddings) per Redis chunk
+SENTENCES_PER_CHUNK  = 10
+SUMMARY_SENTENCES    = 5      # how many sentences to use for the extractive summary
 
 # ── Singletons ─────────────────────────────────────────────────────────────────
-r     = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
+r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
+os.makedirs(DOC_JSON_PATH, exist_ok=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -97,13 +106,81 @@ def _split_sentences(text: str) -> list[str]:
     Lightweight sentence splitter — splits on '.', '!', '?'
     Filters out blank lines and very short fragments.
     """
-    import re
     raw = re.split(r"(?<=[.!?])\s+", text.strip())
     return [s.strip() for s in raw if len(s.strip()) > 10]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STEP 2 — EMBED
+# STEP 2 — PERSIST JSON TO DISK
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def persist_json(doc_name: str, original_filename: str, sentences: list[str]) -> str:
+    """
+    Save the full sentence list as a JSON file on disk.
+    Returns the file path so it can be stored in the registry.
+    """
+    payload = {
+        "doc_name":          doc_name,
+        "original_filename": original_filename,
+        "ingested_at":       _now(),
+        "sentence_count":    len(sentences),
+        "sentences":         sentences,
+    }
+    path = os.path.join(DOC_JSON_PATH, f"{doc_name}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    print(f"[json]     '{doc_name}'  →  {path}")
+    return path
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 3 — EXTRACTIVE SUMMARY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def build_summary(sentences: list[str], n: int = SUMMARY_SENTENCES) -> str:
+    """
+    Lightweight extractive summary — first N non-trivial sentences joined.
+    No LLM required; keeps the registry fast and lightweight.
+    """
+    picked = [s for s in sentences if len(s.split()) >= 6][:n]
+    return " ".join(picked)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 4 — REDIS REGISTRY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def register_document(
+    doc_name:          str,
+    original_filename: str,
+    summary:           str,
+    json_path:         str,
+    sentence_count:    int,
+) -> None:
+    """
+    Store a human-readable registry entry in Redis.
+
+    Key:   doc:registry:<doc_name>
+    Value: JSON { doc_name, original_filename, summary,
+                  json_path, sentence_count, ingested_at }
+
+    Separate from <doc_name>:meta (chunk-level index).
+    Browse with list_registry().
+    """
+    entry = {
+        "doc_name":          doc_name,
+        "original_filename": original_filename,
+        "summary":           summary,
+        "json_path":         json_path,
+        "sentence_count":    sentence_count,
+        "ingested_at":       _now(),
+    }
+    r.set(f"doc:registry:{doc_name}", json.dumps(entry))
+    print(f"[registry] '{doc_name}'  →  registered in Redis")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 5 — EMBED
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def embed_sentences(sentences: list[str]) -> np.ndarray:
@@ -181,14 +258,32 @@ def ingest(storage_path: str) -> list[str]:
     """
     Run the full pipeline for every document found at storage_path.
 
-    Returns list of doc_names that were stored.
+    Steps per document
+    ------------------
+    1. Load sentences from file
+    2. Persist sentences as JSON to disk  (doc_storage/json_store/<name>.json)
+    3. Build extractive summary
+    4. Register { filename, summary, json_path } in Redis  (doc:registry:<name>)
+    5. Embed sentences
+    6. Chunk + store embeddings in Redis  (<name>:chunk:N, <name>:meta)
+
+    Returns list of doc_names stored.
     """
-    documents  = load_documents(storage_path)          # Step 1
-    stored     = []
+    documents = load_documents(storage_path)
+    stored    = []
 
     for doc_name, sentences in documents.items():
-        vectors = embed_sentences(sentences)           # Step 2
-        store_document(doc_name, sentences, vectors)   # Step 3 + 4 + 5
+        original_filename = os.path.basename(storage_path)
+
+        # Steps 2–4: persist, summarise, register
+        json_path = persist_json(doc_name, original_filename, sentences)
+        summary   = build_summary(sentences)
+        register_document(doc_name, original_filename, summary, json_path, len(sentences))
+
+        # Steps 5–6: embed + chunk store
+        vectors = embed_sentences(sentences)
+        store_document(doc_name, sentences, vectors)
+
         stored.append(doc_name)
         print()
 
@@ -357,6 +452,39 @@ def list_documents() -> list[dict]:
         for key in r.keys("*:meta")
         if r.get(key)
     ]
+
+
+def list_registry() -> list[dict]:
+    """
+    Return all registry entries — one per ingested document.
+    Each entry has: doc_name, original_filename, summary, json_path,
+                    sentence_count, ingested_at.
+    """
+    keys = r.keys("doc:registry:*")
+    entries = []
+    for key in keys:
+        raw = r.get(key)
+        if raw:
+            entries.append(json.loads(raw))
+    return sorted(entries, key=lambda x: x.get("ingested_at", ""), reverse=True)
+
+
+def get_registry_entry(doc_name: str) -> Optional[dict]:
+    """Return the registry entry for a single document, or None if not found."""
+    raw = r.get(f"doc:registry:{doc_name}")
+    return json.loads(raw) if raw else None
+
+
+def load_json_store(doc_name: str) -> Optional[dict]:
+    """
+    Load the persisted JSON file for a document from disk.
+    Returns the full payload including all sentences, or None if file missing.
+    """
+    path = os.path.join(DOC_JSON_PATH, f"{doc_name}.json")
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def _now() -> str:

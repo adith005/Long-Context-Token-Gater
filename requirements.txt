@@ -1,7 +1,18 @@
+# Core
 numpy
 redis
-sentence-transformers
-pypdf
 requests
+
+# Embeddings
+sentence-transformers
+
+# Document handling
+pypdf
+
+# Frontend
 streamlit
 pandas
+
+# Testing
+pytest
+pytest-asyncio

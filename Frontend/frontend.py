@@ -3,14 +3,15 @@ import asyncio
 import sys
 import os
 import json
+import time
 import pandas as pd
 
-# Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from orchestrator.pipeline import run_pipeline
-from doc_storage.document_store import ingest
+from doc_storage.document_store import ingest, list_registry
 from needlebench import run_benchmark, NEEDLES, HAYSTACK_SIZES
+from tracer import PipelineTracer
 
 
 # ─────────────────────────────────────────────────────────────
@@ -20,21 +21,24 @@ from needlebench import run_benchmark, NEEDLES, HAYSTACK_SIZES
 st.set_page_config(page_title="Token Optimizer", layout="wide")
 st.title("⚔️ Token Optimizer Playground")
 
-tab_playground, tab_needlebench = st.tabs(["💬 Playground", "🔬 NeedleBench Eval"])
+tab_playground, tab_trace, tab_needlebench = st.tabs([
+    "💬 Playground",
+    "🔍 Pipeline Trace",
+    "🔬 NeedleBench Eval",
+])
 
 
 # ─────────────────────────────────────────────────────────────
-# Sidebar — PDF upload (shared across tabs)
+# Sidebar
 # ─────────────────────────────────────────────────────────────
 
 st.sidebar.header("Upload PDF")
 uploaded_file = st.sidebar.file_uploader(
-    "Upload a PDF document to add it to the knowledge base.",
-    type="pdf"
+    "Upload a PDF to add to the knowledge base.", type="pdf"
 )
 
 if uploaded_file is not None:
-    temp_dir = "tmp_uploads"
+    temp_dir  = "tmp_uploads"
     os.makedirs(temp_dir, exist_ok=True)
     temp_path = os.path.join(temp_dir, uploaded_file.name)
     with open(temp_path, "wb") as f:
@@ -43,22 +47,71 @@ if uploaded_file is not None:
         stored_docs = ingest(temp_path)
         st.sidebar.success(f"Ingested: {', '.join(stored_docs)}")
     except Exception as e:
-        st.sidebar.error(f"Error ingesting PDF: {e}")
+        st.sidebar.error(f"Error: {e}")
+
+# ── Document Registry ──────────────────────────────────────────────────────────
+st.sidebar.divider()
+st.sidebar.header("📚 Ingested Documents")
+
+registry = list_registry()
+if not registry:
+    st.sidebar.caption("No documents ingested yet.")
+else:
+    for entry in registry:
+        with st.sidebar.expander(f"📄 {entry['original_filename']}"):
+            st.caption(f"Sentences: {entry['sentence_count']}  |  {entry['ingested_at']}")
+            st.markdown(f"**Summary**")
+            st.write(entry["summary"])
+            st.caption(f"`{entry['json_path']}`")
 
 
 # ─────────────────────────────────────────────────────────────
-# TAB 1 — Playground (original, unchanged)
+# Shared: render a trace event as an expander
+# ─────────────────────────────────────────────────────────────
+
+STEP_ICONS = {
+    1: "📥",   # Input
+    2: "🔢",   # Embed
+    3: "🔍",   # Retrieve
+    4: "🚪",   # Gate
+    5: "📝",   # Prompt
+    6: "🤖",   # LLM
+    7: "💾",   # Memory
+    8: "📤",   # Output
+}
+
+def render_event(event: dict, container=None):
+    target = container or st
+    icon   = STEP_ICONS.get(event["step"], "•")
+    status = "✅" if event["status"] == "ok" else "❌"
+    label  = f"{status} Step {event['step']} — {icon} {event['name']}  (+{event['elapsed']}s)"
+
+    with target.expander(label, expanded=False):
+        st.json(event["data"])
+
+
+def render_trace(events: list, container=None):
+    target = container or st
+    if not events:
+        target.info("No trace events yet.")
+        return
+    for event in events:
+        render_event(event, target)
+
+
+# ─────────────────────────────────────────────────────────────
+# TAB 1 — Playground
 # ─────────────────────────────────────────────────────────────
 
 with tab_playground:
-    st.markdown("Enter a prompt below to compare gated vs non-gated LLM responses.")
+    st.markdown("Compare gated vs non-gated responses side by side.")
 
-    async def run_comparison(prompt, placeholder_gated, placeholder_non_gated):
+    async def run_comparison(prompt, ph_gated, ph_non_gated):
         gated_task     = asyncio.to_thread(run_pipeline, prompt, gating_mode="entropy")
         non_gated_task = asyncio.to_thread(run_pipeline, prompt, gating_mode="none")
         gated_result, non_gated_result = await asyncio.gather(gated_task, non_gated_task)
 
-        with placeholder_gated.container():
+        with ph_gated.container():
             st.subheader("Gating LLM (entropy)")
             st.markdown(gated_result["gated"]["response_text"])
             st.dataframe(
@@ -67,7 +120,7 @@ with tab_playground:
                 ]
             )
 
-        with placeholder_non_gated.container():
+        with ph_non_gated.container():
             st.subheader("Non-Gating LLM (none)")
             st.markdown(non_gated_result["gated"]["response_text"])
             st.dataframe(
@@ -93,55 +146,104 @@ with tab_playground:
 
 
 # ─────────────────────────────────────────────────────────────
-# TAB 2 — NeedleBench Evaluation
+# TAB 2 — Pipeline Trace
+# ─────────────────────────────────────────────────────────────
+
+with tab_trace:
+    st.markdown(
+        "Run a query and watch every pipeline step in real time — "
+        "inputs, outputs, timing, and what the gater selected."
+    )
+
+    tc1, tc2 = st.columns([3, 1])
+    with tc1:
+        trace_query = st.text_input(
+            "Query", placeholder="e.g. What is the operating frequency of the SX1278?"
+        )
+    with tc2:
+        trace_mode = st.selectbox("Gating mode", ["entropy", "simple", "none"], key="trace_mode")
+
+    run_trace_btn = st.button("▶ Run & Trace", type="primary")
+
+    if run_trace_btn and trace_query:
+
+        tracer   = PipelineTracer()
+        trace_ph = st.empty()         # live update target
+        done_ph  = st.empty()
+
+        # We run the pipeline in a thread so Streamlit doesn't block,
+        # but since PipelineTracer is synchronous we poll after completion.
+        with st.spinner("Running pipeline…"):
+            result = run_pipeline(trace_query, gating_mode=trace_mode, tracer=tracer)
+
+        # ── Render all events ─────────────────────────────────
+        st.success(f"Pipeline complete in {tracer.events[-1]['elapsed']}s")
+
+        for event in tracer.events:
+            render_event(event)
+
+        # ── Final response ────────────────────────────────────
+        st.divider()
+        st.subheader("🤖 Final Response")
+        st.markdown(result["gated"]["response_text"] or "*No response (LLM not connected?)*")
+
+        col_a, col_b, col_c = st.columns(3)
+        col_a.metric("Prompt Tokens",     result["gated"]["prompt_tokens"])
+        col_b.metric("Completion Tokens", result["gated"]["completion_tokens"])
+        col_c.metric("Latency (s)",       round(result["gated"]["total_time_sec"] or 0, 2))
+
+        # ── Raw trace download ────────────────────────────────
+        st.download_button(
+            label     = "⬇ Download trace JSON",
+            data      = json.dumps(tracer.events, indent=2),
+            file_name = "pipeline_trace.json",
+            mime      = "application/json",
+        )
+
+    elif run_trace_btn and not trace_query:
+        st.warning("Enter a query first.")
+
+
+# ─────────────────────────────────────────────────────────────
+# TAB 3 — NeedleBench Eval
 # ─────────────────────────────────────────────────────────────
 
 with tab_needlebench:
     st.markdown(
         "**NeedleBench** measures how well each gating strategy retrieves a specific "
-        "fact buried inside a large set of distractors, and how accurately the LLM "
-        "answers using only the selected context window."
+        "fact buried inside a large set of distractors."
     )
 
-    # ── Config ────────────────────────────────────────────────
-    cfg_col1, cfg_col2, cfg_col3 = st.columns(3)
+    cfg1, cfg2, cfg3 = st.columns(3)
 
-    with cfg_col1:
+    with cfg1:
         selected_modes = st.multiselect(
-            "Gating modes to compare",
+            "Gating modes",
             options=["entropy", "simple", "none"],
             default=["entropy", "simple", "none"],
         )
-
-    with cfg_col2:
+    with cfg2:
         selected_haystacks = st.multiselect(
             "Haystack sizes",
             options=list(HAYSTACK_SIZES.keys()),
             default=list(HAYSTACK_SIZES.keys()),
-            help="short=15 fillers, medium=40, long=80",
+            help="short=15, medium=40, long=80 fillers",
         )
-
-    with cfg_col3:
+    with cfg3:
         use_llm = st.toggle(
-            "Include LLM calls",
-            value=False,
-            help="Requires LM Studio running on localhost:1234. "
-                 "Off = retrieval-only scoring (much faster).",
+            "Include LLM calls", value=False,
+            help="Requires LM Studio on localhost:1234. Off = retrieval-only (fast).",
         )
 
     n_tests = len(NEEDLES) * len(selected_modes) * len(selected_haystacks)
-    st.caption(
-        f"Tests to run: **{n_tests}** "
-        f"({len(NEEDLES)} needles × {len(selected_modes)} modes × {len(selected_haystacks)} sizes)"
-    )
+    st.caption(f"Tests to run: **{n_tests}**")
 
-    run_btn = st.button(
+    run_nb_btn = st.button(
         "▶ Run NeedleBench", type="primary",
-        disabled=not selected_modes or not selected_haystacks
+        disabled=not selected_modes or not selected_haystacks,
     )
 
-    # ── Run ───────────────────────────────────────────────────
-    if run_btn:
+    if run_nb_btn:
         progress_bar = st.progress(0, text="Starting…")
         live_log     = st.empty()
         live_rows    = []
@@ -180,7 +282,6 @@ with tab_needlebench:
         progress_bar.progress(1.0, text="Complete ✅")
         summary = bench_output["summary"]
 
-        # ── Overall comparison ────────────────────────────────
         st.subheader("Overall Results")
         overall_rows = []
         for mode in selected_modes:
@@ -195,56 +296,41 @@ with tab_needlebench:
             })
         st.dataframe(pd.DataFrame(overall_rows), use_container_width=True)
 
-        # ── Recall heatmap: haystack size ─────────────────────
         st.subheader("Recall Rate by Haystack Size")
         recall_h = {
-            mode: {
-                h: summary[mode]["by_haystack"].get(h, {}).get("recall_rate", 0)
-                for h in selected_haystacks
-            }
+            mode: {h: summary[mode]["by_haystack"].get(h, {}).get("recall_rate", 0)
+                   for h in selected_haystacks}
             for mode in selected_modes
         }
         st.dataframe(
             pd.DataFrame(recall_h).T.style.format("{:.1%}").background_gradient(
-                cmap="RdYlGn", vmin=0, vmax=1
-            ),
+                cmap="RdYlGn", vmin=0, vmax=1),
             use_container_width=True,
         )
 
-        # ── Recall heatmap: depth ─────────────────────────────
         st.subheader("Recall Rate by Needle Depth")
         depths = ["shallow", "middle", "deep"]
         recall_d = {
-            mode: {
-                d: summary[mode]["by_depth"].get(d, {}).get("recall_rate", 0)
-                for d in depths
-            }
+            mode: {d: summary[mode]["by_depth"].get(d, {}).get("recall_rate", 0)
+                   for d in depths}
             for mode in selected_modes
         }
         st.dataframe(
             pd.DataFrame(recall_d).T.style.format("{:.1%}").background_gradient(
-                cmap="RdYlGn", vmin=0, vmax=1
-            ),
+                cmap="RdYlGn", vmin=0, vmax=1),
             use_container_width=True,
         )
 
-        # ── Token cost ────────────────────────────────────────
         st.subheader("Avg Prompt Tokens by Haystack Size")
         token_data = {
-            mode: {
-                h: int(summary[mode]["by_haystack"].get(h, {}).get("avg_prompt_tokens", 0))
-                for h in selected_haystacks
-            }
+            mode: {h: int(summary[mode]["by_haystack"].get(h, {}).get("avg_prompt_tokens", 0))
+                   for h in selected_haystacks}
             for mode in selected_modes
         }
         st.dataframe(pd.DataFrame(token_data).T, use_container_width=True)
 
-        # ── Full log + download ───────────────────────────────
         with st.expander("Full result log"):
-            st.dataframe(
-                pd.DataFrame(bench_output["all_results"]),
-                use_container_width=True,
-            )
+            st.dataframe(pd.DataFrame(bench_output["all_results"]), use_container_width=True)
 
         st.download_button(
             label     = "⬇ Download results JSON",

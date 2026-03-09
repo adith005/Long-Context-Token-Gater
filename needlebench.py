@@ -46,49 +46,13 @@ from gating.token_gater import build_context_window
 from prompt_creator.builder import build_prompt
 from llm_handler.handler import call_llm
 from app_io.output_handler import process_output
-
+from locomo_adapter import load_locomo_needles, load_locomo_fillers
 
 # ═════════════════════════════════════════════════════════════════════════════
 # NEEDLE DATASET
 # ═════════════════════════════════════════════════════════════════════════════
 
-NEEDLES = [
-    {
-        "id":              "nb_001",
-        "fact":            "The secret launch code for Project Helios is ZETA-7742-OMEGA.",
-        "question":        "What is the secret launch code for Project Helios?",
-        "answer_keywords": ["ZETA-7742-OMEGA", "ZETA", "7742"],
-        "depth":           "shallow",
-    },
-    {
-        "id":              "nb_002",
-        "fact":            "Dr. Amara Chen discovered the protein folding shortcut in March 1987.",
-        "question":        "Who discovered the protein folding shortcut and when?",
-        "answer_keywords": ["Amara Chen", "Chen", "1987", "March"],
-        "depth":           "middle",
-    },
-    {
-        "id":              "nb_003",
-        "fact":            "The maximum safe operating temperature for Reactor 4-B is 847 degrees Celsius.",
-        "question":        "What is the maximum safe operating temperature for Reactor 4-B?",
-        "answer_keywords": ["847", "degrees", "Celsius"],
-        "depth":           "deep",
-    },
-    {
-        "id":              "nb_004",
-        "fact":            "Agent Valeria Moreno uses the alias 'Nightingale' during field operations.",
-        "question":        "What alias does Agent Valeria Moreno use in the field?",
-        "answer_keywords": ["Nightingale", "nightingale"],
-        "depth":           "middle",
-    },
-    {
-        "id":              "nb_005",
-        "fact":            "The encryption passphrase for Vault 9 is: broken-mirror-cascade-41.",
-        "question":        "What is the encryption passphrase for Vault 9?",
-        "answer_keywords": ["broken-mirror-cascade-41", "broken-mirror", "cascade-41"],
-        "depth":           "deep",
-    },
-]
+NEEDLES     = load_locomo_needles("locomo10.json")
 
 HAYSTACK_SIZES = {
     "short":  15,
@@ -96,39 +60,7 @@ HAYSTACK_SIZES = {
     "long":   80,
 }
 
-FILLER_POOL = [
-    "The committee reviewed all submitted proposals before the final vote.",
-    "Annual rainfall in the northern region averaged 340mm over the last decade.",
-    "Section 4.2 of the regulation requires written consent from all parties.",
-    "The bridge construction was completed six months ahead of schedule.",
-    "Laboratory samples must be stored at minus twenty degrees Celsius.",
-    "The quarterly report showed a seven percent increase in operating costs.",
-    "All vehicles must undergo inspection before crossing the border checkpoint.",
-    "The archaeological dig revealed pottery fragments dating to the 3rd century.",
-    "Network latency must remain below fifty milliseconds for real-time use.",
-    "Staff members are required to complete annual safety training by December.",
-    "The satellite achieved stable orbit at an altitude of 420 kilometres.",
-    "Water quality tests indicated elevated phosphate levels in the eastern basin.",
-    "The merger agreement was signed by both boards on the fifteenth of June.",
-    "Wind turbine efficiency drops significantly when temperatures fall below zero.",
-    "Historical records show the town was founded by settlers in 1802.",
-    "The clinical trial enrolled 1,200 participants across five medical centres.",
-    "Emergency evacuation routes must be posted in all public-facing corridors.",
-    "The new firmware update resolves a critical authentication vulnerability.",
-    "Peak electricity demand typically occurs between 6 and 9 pm on weekdays.",
-    "Customs declarations are mandatory for all shipments exceeding 1,000 euros.",
-    "The compiler optimisation reduced average build times by thirty percent.",
-    "All patient records are encrypted using AES-256 before storage.",
-    "The telescope's primary mirror measures 6.5 metres in diameter.",
-    "Training datasets were balanced to ensure equal class representation.",
-    "The treaty was ratified by twelve member states within the first year.",
-    "Soil samples from grid sector C showed unusually high nitrogen content.",
-    "The pilot programme was extended for another six months pending review.",
-    "Revenue from subscriptions now accounts for sixty percent of total income.",
-    "The algorithm's time complexity is O(n log n) in the average case.",
-    "All outbound communications are logged and retained for 90 days.",
-]
-
+FILLER_POOL = load_locomo_fillers("locomo10.json")
 
 # ═════════════════════════════════════════════════════════════════════════════
 # HAYSTACK BUILDER

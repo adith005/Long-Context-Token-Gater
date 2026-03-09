@@ -56,6 +56,43 @@ class RedisMemoryStore:
         pipeline.execute()
         return memory_id
 
+    def ingest_exchange(self, user_content: str, assistant_content: str, cluster_id: int = 0) -> str:
+        """
+        Store a user + assistant turn as a single memory unit.
+
+        The embedding is computed over the combined text so the exchange
+        can be retrieved whether the user's next query resembles the
+        question or the answer.
+
+        Redis hash fields
+        -----------------
+          content           — combined text shown in prompt context
+          user_content      — raw user question
+          assistant_content — raw assistant answer
+          source            — "exchange"
+        """
+        combined  = f"Q: {user_content}\nA: {assistant_content}"
+        embedding = embed(combined)
+
+        memory_id = str(uuid.uuid4())
+        key       = f"mem:{cluster_id}:{memory_id}"
+
+        pipeline = self.redis.pipeline()
+        pipeline.hset(key, mapping={
+            "content":           combined,
+            "user_content":      user_content,
+            "assistant_content": assistant_content,
+            "cluster_id":        cluster_id,
+            "token_len":         len(combined) // 4,
+            "timestamp":         int(time.time()),
+            "usefulness":        0.5,
+            "access_count":      0,
+            "source":            "exchange",
+        })
+        pipeline.hset(key, "embedding", self._serialize_vector(embedding))
+        pipeline.execute()
+        return memory_id
+
     def retrieve_all(self, query_vec: np.ndarray, top_k: int = 10) -> List[Dict]:
         # Fallback to simple search if clusters aren't used/set up
         keys = self.redis.keys("mem:*")
@@ -93,3 +130,10 @@ def remember(source: str, content: str):
     vec = embed(content)
     # Using a default cluster 0 for simplicity in this stage
     _store.ingest_memory(content, vec, cluster_id=0, token_len=len(content)//4, source=source)
+
+def remember_exchange(user_content: str, assistant_content: str):
+    """
+    Store a full Q+A turn as one memory unit.
+    Use this instead of calling remember() twice.
+    """
+    _store.ingest_exchange(user_content, assistant_content)

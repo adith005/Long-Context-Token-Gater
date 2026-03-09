@@ -5,7 +5,8 @@ REDIS_DB = 0
 EMBED_MODEL = "all-MiniLM-L6-v2"
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 100
-DOC_STORE_PATH = "rag_storage"
+DOC_STORE_PATH  = "rag_storage"
+DOC_JSON_PATH   = "doc_storage/json_store"    # persisted JSON files for uploaded docs
 
 # Model for inference (OpenAI, Ollama, etc.)
 LLM_PROVIDER = "lmstudio"
