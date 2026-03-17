@@ -30,5 +30,5 @@ MEMORY_TTL_DAYS          = 30
 MEMORY_TTL_USEFULNESS    = 0.3
 
 LLM_PROVIDER = "lmstudio"
-LLM_MODEL    = "lfm2.5-1.2b-thinking"
+LLM_MODEL    = "liquid/lfm2.5-1.2b"
 

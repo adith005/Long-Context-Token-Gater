@@ -16,6 +16,54 @@ from tracer import PipelineTracer
 
 
 # ─────────────────────────────────────────────────────────────
+# Cost & Metric Helpers
+# ─────────────────────────────────────────────────────────────
+
+INPUT_COST_PER_TOKEN  = 0.20 / 1_000_000   # $0.20 per 1M input tokens
+OUTPUT_COST_PER_TOKEN = 1.00 / 1_000_000   # $1.00 per 1M output tokens
+
+def calc_cost(prompt_tokens: int, completion_tokens: int) -> float:
+    return round(
+        prompt_tokens     * INPUT_COST_PER_TOKEN +
+        completion_tokens * OUTPUT_COST_PER_TOKEN,
+        8,
+    )
+
+def calc_tps(completion_tokens: int, total_time_sec: float) -> float:
+    if total_time_sec and total_time_sec > 0:
+        return round(completion_tokens / total_time_sec, 2)
+    return 0.0
+
+def build_metrics_df(result_dict: dict) -> pd.DataFrame:
+    """Build full metrics dataframe from a pipeline result."""
+    g  = result_dict.get("gated", {})
+    gs = result_dict.get("gating_stats", {})
+
+    pt  = g.get("prompt_tokens",     0)
+    ct  = g.get("completion_tokens", 0)
+    ts  = g.get("total_time_sec",    0) or 0
+
+    row = {
+        "prompt_tokens":      pt,
+        "completion_tokens":  ct,
+        "total_time_sec":     round(ts, 3),
+        "tokens_per_second":  calc_tps(ct, ts),
+        "hypothetical_cost":  f"${calc_cost(pt, ct):.8f}",
+        "cost_of_pass":       f"${calc_cost(pt, ct):.8f}",
+    }
+
+    if gs:
+        row["candidates_in"]  = gs.get("candidates_in", "—")
+        row["window_size"]    = gs.get("window_size",   "—")
+        row["pruned"]         = gs.get("pruned",        "—")
+        row["plateau_at"]     = gs.get("plateau_at",    "—")
+        row["window_entropy"] = result_dict.get("window_entropy", "—")
+        row["entropy_stable"] = result_dict.get("is_stable",      "—")
+
+    return pd.DataFrame([row])
+
+
+# ─────────────────────────────────────────────────────────────
 # Page Setup
 # ─────────────────────────────────────────────────────────────
 
@@ -146,23 +194,87 @@ with tab_playground:
         non_gated_task = asyncio.to_thread(run_pipeline, prompt, gating_mode="none")
         gated_result, non_gated_result = await asyncio.gather(gated_task, non_gated_task)
 
+        # ── Gated column ──────────────────────────────────────
         with ph_gated.container():
-            st.subheader("Gating LLM (entropy)")
+            st.subheader("🔒 Gating LLM (entropy)")
             st.markdown(gated_result["gated"]["response_text"])
-            st.dataframe(
-                pd.DataFrame([gated_result["gated"]])[
-                    ["prompt_tokens", "completion_tokens", "total_time_sec"]
-                ]
-            )
 
+            with st.expander("📊 Pipeline Trace — Gated", expanded=True):
+                st.dataframe(build_metrics_df(gated_result), use_container_width=True)
+
+                g  = gated_result.get("gated", {})
+                gs = gated_result.get("gating_stats", {})
+                pt = g.get("prompt_tokens", 0)
+                ct = g.get("completion_tokens", 0)
+                ts = g.get("total_time_sec", 0) or 0
+
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Prompt Tokens",     pt)
+                m2.metric("Completion Tokens", ct)
+                m3.metric("Time (s)",          round(ts, 3))
+
+                m4, m5, m6 = st.columns(3)
+                m4.metric("Tokens / sec",      calc_tps(ct, ts))
+                m5.metric("Hypothetical Cost", f"${calc_cost(pt, ct):.8f}")
+                m6.metric("Window Size",       gs.get("window_size", "—"))
+
+                if gs:
+                    st.caption(
+                        f"Candidates in: {gs.get('candidates_in','—')}  |  "
+                        f"Pruned: {gs.get('pruned','—')}  |  "
+                        f"Plateau at: {gs.get('plateau_at','—')}  |  "
+                        f"Entropy stable: {gated_result.get('is_stable','—')}"
+                    )
+
+        # ── Non-gated column ──────────────────────────────────
         with ph_non_gated.container():
-            st.subheader("Non-Gating LLM (none)")
+            st.subheader("🔓 Non-Gating LLM (none)")
             st.markdown(non_gated_result["gated"]["response_text"])
-            st.dataframe(
-                pd.DataFrame([non_gated_result["gated"]])[
-                    ["prompt_tokens", "completion_tokens", "total_time_sec"]
-                ]
-            )
+
+            with st.expander("📊 Pipeline Trace — Non-Gated", expanded=True):
+                st.dataframe(build_metrics_df(non_gated_result), use_container_width=True)
+
+                g  = non_gated_result.get("gated", {})
+                pt = g.get("prompt_tokens", 0)
+                ct = g.get("completion_tokens", 0)
+                ts = g.get("total_time_sec", 0) or 0
+
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Prompt Tokens",     pt)
+                m2.metric("Completion Tokens", ct)
+                m3.metric("Time (s)",          round(ts, 3))
+
+                m4, m5, m6 = st.columns(3)
+                m4.metric("Tokens / sec",      calc_tps(ct, ts))
+                m5.metric("Hypothetical Cost", f"${calc_cost(pt, ct):.8f}")
+                m6.metric("Window Size",       "all candidates")
+
+        # ── Cross-comparison summary ───────────────────────────
+        g_pt  = gated_result.get("gated", {}).get("prompt_tokens", 0)
+        ng_pt = non_gated_result.get("gated", {}).get("prompt_tokens", 0)
+        g_ct  = gated_result.get("gated", {}).get("completion_tokens", 0)
+        ng_ct = non_gated_result.get("gated", {}).get("completion_tokens", 0)
+
+        g_cost  = calc_cost(g_pt,  g_ct)
+        ng_cost = calc_cost(ng_pt, ng_ct)
+        tcr     = round(ng_pt / g_pt, 4) if g_pt > 0 else 1.0
+        saved   = round(ng_cost - g_cost, 8)
+
+        st.divider()
+        st.subheader("⚖️ Comparison Summary")
+        c1, c2, c3 = st.columns(3)
+        c1.metric(
+            "Token Compression Ratio", tcr,
+            delta=f"{round((tcr-1)*100, 1)}% fewer tokens" if tcr > 1 else None,
+        )
+        c2.metric(
+            "Cost saved per query", f"${saved}",
+            delta=f"{round((1 - g_cost/ng_cost)*100, 2)}% cheaper" if ng_cost > 0 else None,
+        )
+        c3.metric(
+            "Gated window size",
+            gated_result.get("gating_stats", {}).get("window_size", "—"),
+        )
 
     user_input = st.chat_input("Enter your prompt for both models...")
     col1, col2 = st.columns(2)
@@ -222,10 +334,35 @@ with tab_trace:
         st.subheader("🤖 Final Response")
         st.markdown(result["gated"]["response_text"] or "*No response (LLM not connected?)*")
 
+        g  = result.get("gated", {})
+        gs = result.get("gating_stats", {})
+        pt = g.get("prompt_tokens",     0)
+        ct = g.get("completion_tokens", 0)
+        ts = g.get("total_time_sec",    0) or 0
+
+        st.subheader("📊 Output Metrics")
+        st.dataframe(build_metrics_df(result), use_container_width=True)
+
         col_a, col_b, col_c = st.columns(3)
-        col_a.metric("Prompt Tokens",     result["gated"]["prompt_tokens"])
-        col_b.metric("Completion Tokens", result["gated"]["completion_tokens"])
-        col_c.metric("Latency (s)",       round(result["gated"]["total_time_sec"] or 0, 2))
+        col_a.metric("Prompt Tokens",     pt)
+        col_b.metric("Completion Tokens", ct)
+        col_c.metric("Latency (s)",       round(ts, 3))
+
+        col_d, col_e, col_f = st.columns(3)
+        col_d.metric("Tokens / sec",      calc_tps(ct, ts))
+        col_e.metric("Hypothetical Cost", f"${calc_cost(pt, ct):.8f}")
+        col_f.metric("Cost of Pass",      f"${calc_cost(pt, ct):.8f}")
+
+        if gs:
+            col_g, col_h, col_i = st.columns(3)
+            col_g.metric("Window Size",    gs.get("window_size",   "—"))
+            col_h.metric("Candidates In",  gs.get("candidates_in", "—"))
+            col_i.metric("Pruned",         gs.get("pruned",        "—"))
+            st.caption(
+                f"Plateau at: {gs.get('plateau_at','—')}  |  "
+                f"Window entropy: {result.get('window_entropy','—')}  |  "
+                f"Entropy stable: {result.get('is_stable','—')}"
+            )
 
         # ── Raw trace download ────────────────────────────────
         st.download_button(

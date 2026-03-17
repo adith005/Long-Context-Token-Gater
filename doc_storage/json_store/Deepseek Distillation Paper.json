@@ -1,7 +1,7 @@
 {
   "doc_name": "Deepseek Distillation Paper",
   "original_filename": "Deepseek Distillation Paper.pdf",
-  "ingested_at": "2026-03-09T09:04:18Z",
+  "ingested_at": "2026-03-11T01:52:44Z",
   "sentence_count": 491,
   "sentences": [
     "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via\nReinforcement Learning\nDeepSeek-AI\nresearch@deepseek.com\nAbstract\nWe introduce our first-generation reasoning models, DeepSeek-R1-Zero and DeepSeek-R1.",
