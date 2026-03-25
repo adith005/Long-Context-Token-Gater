@@ -308,7 +308,7 @@ with tab_trace:
             "Query", placeholder="e.g. What is the operating frequency of the SX1278?"
         )
     with tc2:
-        trace_mode = st.selectbox("Gating mode", ["entropy", "simple", "none"], key="trace_mode")
+        trace_mode = st.selectbox("Gating mode", ["entropy", "simple", "none", "bm25", "joint", "quantum"], key="trace_mode")
 
     run_trace_btn = st.button("▶ Run & Trace", type="primary")
 
@@ -391,8 +391,8 @@ with tab_needlebench:
     with cfg1:
         selected_modes = st.multiselect(
             "Gating modes",
-            options=["entropy", "simple", "none"],
-            default=["entropy", "simple", "none"],
+            options=["entropy", "simple", "none", "bm25", "joint", "quantum"],
+            default=["entropy", "simple", "none", "bm25", "joint", "quantum"],
         )
     with cfg2:
         selected_haystacks = st.multiselect(

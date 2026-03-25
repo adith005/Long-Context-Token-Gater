@@ -263,7 +263,7 @@ def run_ablation(
     Parameters
     ----------
     config_names    : list of keys from ABLATION_CONFIGS (default: all)
-    modes           : gating modes to test (default: ["entropy","simple","none"])
+    modes           : gating modes to test (default: ["entropy","simple","none","joint"])
     haystack_sizes  : (default: ["short","medium","long"])
     call_llm_flag   : whether to make real LLM calls
     seed            : random seed for haystack construction
@@ -288,7 +288,7 @@ def run_ablation(
     from utils.embedding import embed
 
     config_names   = config_names   or list(ABLATION_CONFIGS.keys())
-    modes          = modes          or ["entropy", "simple", "none"]
+    modes          = modes          or ["entropy", "simple", "none", "bm25", "joint", "quantum"]
     haystack_sizes = haystack_sizes or ["short", "medium", "long"]
 
     configs = {n: ABLATION_CONFIGS[n] for n in config_names if n in ABLATION_CONFIGS}
@@ -519,8 +519,9 @@ if __name__ == "__main__":
     parser.add_argument("--config",   nargs="+", default=list(ABLATION_CONFIGS.keys()),
                         choices=list(ABLATION_CONFIGS.keys()),
                         help="Which ablation configs to run")
-    parser.add_argument("--mode",     nargs="+", default=["entropy", "simple", "none"],
-                        choices=["entropy", "simple", "none"])
+    parser.add_argument("--mode", nargs="+",
+                    default=["entropy", "simple", "none", "bm25", "joint", "quantum"],
+                    choices=["entropy", "simple", "none", "bm25", "joint", "quantum"])
     parser.add_argument("--haystack", nargs="+", default=["short", "medium", "long"],
                         choices=["short", "medium", "long"])
     parser.add_argument("--llm",      action="store_true")

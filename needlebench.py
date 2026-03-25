@@ -202,7 +202,7 @@ def build_candidates(sentences: list, query: str, mode: str = "embedding") -> li
 # GATING  — mirrors pipeline.py step 4 exactly
 # ═════════════════════════════════════════════════════════════════════════════
 
-def gate(candidates: list, mode: str) -> tuple:
+def gate(candidates: list, mode: str, query: str = "") -> tuple:
     """
     Apply gating strategy to candidate list.
 
@@ -213,6 +213,7 @@ def gate(candidates: list, mode: str) -> tuple:
     none     : all candidates                (no gating baseline)
     bm25     : top-15 by BM25 score          (IR baseline — candidates
                must already be BM25-scored via build_candidates(mode="bm25"))
+    joint
     """
     if mode == "entropy":
         result = build_context_window(candidates)
@@ -220,6 +221,34 @@ def gate(candidates: list, mode: str) -> tuple:
     elif mode in ("simple", "bm25"):
         selected = candidates[:15]
         return selected, {"strategy": mode, "window_size": len(selected)}
+    elif mode == "joint":
+        from gating.joint_entropy_gater import JointEntropyMemorySelector
+        mems = [{"text": c["content"], "similarity": c["confidence"]/100} for c in candidates]
+        selector = JointEntropyMemorySelector(mems, similarity_threshold=0.3)
+        result = selector.select_optimal_greedy(target_size=15, method="joint_entropy")
+        selected = [candidates[i] for i in result["selected_indices"]]
+        return selected, {"strategy": "joint", "window_size": len(selected)}
+    elif mode == "quantum":
+        from gating.quantum_gater import quantum_inspired_gate
+        from utils.embedding import embed
+        import numpy as np
+
+        query_text       = candidates[0].get("doc_name", "")   # not available here
+        # embeddings were computed during build_candidates — re-embed content
+        contents         = [c["content"] for c in candidates]
+        memory_embeddings = [embed(c) for c in contents]
+        query_embedding  = memory_embeddings[0]  # placeholder — see note below
+        result = quantum_inspired_gate(
+            query            = query,
+            query_embedding  = query_embedding,
+            memory_embeddings= memory_embeddings,
+            memory_contents  = contents,
+            top_k_initial    = 15,
+        )
+        selected_texts = {m["content"] for m in result["selected_memories"]}
+        selected = [c for c in candidates if c["content"] in selected_texts]
+        return selected, {"strategy": "quantum", "window_size": len(selected),
+                      "quantum_metrics": result.get("quantum_metrics", {})}
     else:   # none
         return candidates, {"strategy": "none", "window_size": len(candidates)}
 
@@ -325,7 +354,7 @@ def run_single(
 
     retrieval_mode = "bm25" if gating_mode == "bm25" else "embedding"
     candidates     = build_candidates(sentences, query, mode=retrieval_mode)
-    window, stats  = gate(candidates, gating_mode)
+    window, stats = gate(candidates, gating_mode, query=query)
     recalled       = needle_in_window(needle["fact"], window)
     prompt         = build_prompt(window, query)
     prompt_tokens  = estimate_tokens(prompt)
@@ -408,7 +437,7 @@ def run_benchmark(
     progress_cb(current, total, result) is called after each test for
     Streamlit progress bar.
     """
-    modes          = modes          or ["entropy", "simple", "none", "bm25"]
+    modes          = modes          or modes or ["entropy", "simple", "none", "bm25", "joint", "quantum"]
     haystack_sizes = haystack_sizes or ["short", "medium", "long"]
 
     all_results = []
@@ -622,8 +651,8 @@ def _print_summary(summary: dict, modes, haystack_sizes):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="NeedleBench for Token Gater")
-    parser.add_argument("--mode",     nargs="+", default=["entropy", "simple", "none", "bm25"],
-                        choices=["entropy", "simple", "none", "bm25"])
+    parser.add_argument("--mode", nargs="+", default=["entropy", "simple", "none", "bm25"],
+                    choices=["entropy", "simple", "none", "bm25", "joint", "quantum"])
     parser.add_argument("--haystack", nargs="+", default=["short", "medium", "long"],
                         choices=["short", "medium", "long"])
     parser.add_argument("--llm",      action="store_true",
