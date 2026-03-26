@@ -63,41 +63,1142 @@ from evaluation.metrics import (
 
 NEEDLES = [
     {
-        "id":              "nb_001",
-        "fact":            "The secret launch code for Project Helios is ZETA-7742-OMEGA.",
-        "question":        "What is the secret launch code for Project Helios?",
-        "answer_keywords": ["ZETA-7742-OMEGA", "ZETA", "7742"],
-        "depth":           "shallow",
+        "id": "nb_001",
+        "fact": "The secret launch code for Project Helios is ZETA-7742-OMEGA.",
+        "question": "What is the secret launch code for Project Helios?",
+        "answer_keywords": [
+            "ZETA-7742-OMEGA",
+            "ZETA",
+            "7742"
+        ],
+        "depth": "shallow"
     },
     {
-        "id":              "nb_002",
-        "fact":            "Dr. Amara Chen discovered the protein folding shortcut in March 1987.",
-        "question":        "Who discovered the protein folding shortcut and when?",
-        "answer_keywords": ["Amara Chen", "Chen", "1987", "March"],
-        "depth":           "middle",
+        "id": "nb_002",
+        "fact": "The encryption passphrase for Vault 9 is: broken-mirror-cascade-41.",
+        "question": "What is the encryption passphrase for Vault 9?",
+        "answer_keywords": [
+            "broken-mirror-cascade-41",
+            "broken-mirror",
+            "cascade-41"
+        ],
+        "depth": "deep"
     },
     {
-        "id":              "nb_003",
-        "fact":            "The maximum safe operating temperature for Reactor 4-B is 847 degrees Celsius.",
-        "question":        "What is the maximum safe operating temperature for Reactor 4-B?",
-        "answer_keywords": ["847", "degrees", "Celsius"],
-        "depth":           "deep",
+        "id": "nb_003",
+        "fact": "The access token for the Meridian satellite uplink is TX-9921-BLUE.",
+        "question": "What is the access token for the Meridian satellite uplink?",
+        "answer_keywords": [
+            "TX-9921-BLUE",
+            "TX-9921",
+            "BLUE"
+        ],
+        "depth": "shallow"
     },
     {
-        "id":              "nb_004",
-        "fact":            "Agent Valeria Moreno uses the alias 'Nightingale' during field operations.",
-        "question":        "What alias does Agent Valeria Moreno use in the field?",
-        "answer_keywords": ["Nightingale", "nightingale"],
-        "depth":           "middle",
+        "id": "nb_004",
+        "fact": "The master override code for Station Delta-7 is KRONOS-441.",
+        "question": "What is the master override code for Station Delta-7?",
+        "answer_keywords": [
+            "KRONOS-441",
+            "KRONOS",
+            "441"
+        ],
+        "depth": "middle"
     },
     {
-        "id":              "nb_005",
-        "fact":            "The encryption passphrase for Vault 9 is: broken-mirror-cascade-41.",
-        "question":        "What is the encryption passphrase for Vault 9?",
-        "answer_keywords": ["broken-mirror-cascade-41", "broken-mirror", "cascade-41"],
-        "depth":           "deep",
+        "id": "nb_005",
+        "fact": "The frequency allocation for Channel Epsilon is 2847.6 MHz.",
+        "question": "What is the frequency allocation for Channel Epsilon?",
+        "answer_keywords": [
+            "2847.6",
+            "MHz",
+            "2847"
+        ],
+        "depth": "deep"
     },
+    {
+        "id": "nb_006",
+        "fact": "The serial number of the primary reactor core at Facility Omega is RX-00441-GAMMA.",
+        "question": "What is the serial number of the primary reactor core at Facility Omega?",
+        "answer_keywords": [
+            "RX-00441-GAMMA",
+            "RX-00441",
+            "GAMMA"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_007",
+        "fact": "The emergency beacon identifier for Vessel Aurora is BEACON-77-DELTA.",
+        "question": "What is the emergency beacon identifier for Vessel Aurora?",
+        "answer_keywords": [
+            "BEACON-77-DELTA",
+            "77-DELTA",
+            "BEACON"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_008",
+        "fact": "The cryptographic key for the Sirius network is ALPHA-3390-CIPHER.",
+        "question": "What is the cryptographic key for the Sirius network?",
+        "answer_keywords": [
+            "ALPHA-3390-CIPHER",
+            "3390",
+            "CIPHER"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_009",
+        "fact": "Dr. Amara Chen discovered the protein folding shortcut in March 1987.",
+        "question": "Who discovered the protein folding shortcut and when?",
+        "answer_keywords": [
+            "Amara Chen",
+            "Chen",
+            "1987",
+            "March"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_010",
+        "fact": "Professor Ivan Volkov first demonstrated room-temperature superconductivity on 14 August 2031.",
+        "question": "Who first demonstrated room-temperature superconductivity and on what date?",
+        "answer_keywords": [
+            "Ivan Volkov",
+            "Volkov",
+            "2031",
+            "August"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_011",
+        "fact": "Dr. Leila Nasser identified the causal mutation for Syndrome X in chromosome 17.",
+        "question": "Who identified the causal mutation for Syndrome X and where is it located?",
+        "answer_keywords": [
+            "Leila Nasser",
+            "Nasser",
+            "chromosome 17",
+            "17"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_012",
+        "fact": "Agent Valeria Moreno uses the alias Nightingale during field operations.",
+        "question": "What alias does Agent Valeria Moreno use in the field?",
+        "answer_keywords": [
+            "Nightingale",
+            "nightingale"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_013",
+        "fact": "Commander Yusuf Adeyemi holds the record for the longest uninterrupted spacewalk at 11 hours 42 minutes.",
+        "question": "Who holds the record for the longest uninterrupted spacewalk and what is the duration?",
+        "answer_keywords": [
+            "Yusuf Adeyemi",
+            "Adeyemi",
+            "11 hours",
+            "42 minutes"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_014",
+        "fact": "Dr. Priya Subramaniam synthesised compound VX-7 for the first time on 3 June 2019.",
+        "question": "Who first synthesised compound VX-7 and when?",
+        "answer_keywords": [
+            "Priya Subramaniam",
+            "Subramaniam",
+            "2019",
+            "June"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_015",
+        "fact": "Dr. Elan Brightwater published the unified field correction in the journal Nature on 22 September 2027.",
+        "question": "Who published the unified field correction and where?",
+        "answer_keywords": [
+            "Elan Brightwater",
+            "Brightwater",
+            "Nature",
+            "2027"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_016",
+        "fact": "Agent Kenji Murakami infiltrated the Sokol network using the identity Marcus Webb.",
+        "question": "What identity did Agent Kenji Murakami use to infiltrate the Sokol network?",
+        "answer_keywords": [
+            "Marcus Webb",
+            "Webb",
+            "Murakami"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_017",
+        "fact": "The maximum safe operating temperature for Reactor 4-B is 847 degrees Celsius.",
+        "question": "What is the maximum safe operating temperature for Reactor 4-B?",
+        "answer_keywords": [
+            "847",
+            "degrees",
+            "Celsius"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_018",
+        "fact": "The rated thrust of Engine Model KX-220 is 18,400 Newtons at sea level.",
+        "question": "What is the rated thrust of Engine Model KX-220?",
+        "answer_keywords": [
+            "18,400",
+            "18400",
+            "Newtons",
+            "KX-220"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_019",
+        "fact": "The maximum payload capacity of Drone Unit Sigma-9 is 4.7 kilograms.",
+        "question": "What is the maximum payload capacity of Drone Unit Sigma-9?",
+        "answer_keywords": [
+            "4.7",
+            "kilograms",
+            "Sigma-9"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_020",
+        "fact": "The operating voltage range of Sensor Array Theta is 3.3 to 5.0 volts.",
+        "question": "What is the operating voltage range of Sensor Array Theta?",
+        "answer_keywords": [
+            "3.3",
+            "5.0",
+            "volts",
+            "Theta"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_021",
+        "fact": "The tensile strength of Alloy Z-14 is 1,240 megapascals.",
+        "question": "What is the tensile strength of Alloy Z-14?",
+        "answer_keywords": [
+            "1,240",
+            "1240",
+            "megapascals",
+            "Z-14"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_022",
+        "fact": "The bandwidth of Link Alpha-3 is 2.4 gigabits per second.",
+        "question": "What is the bandwidth of Link Alpha-3?",
+        "answer_keywords": [
+            "2.4",
+            "gigabits",
+            "Alpha-3"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_023",
+        "fact": "The half-life of isotope RX-209 is 14.3 years.",
+        "question": "What is the half-life of isotope RX-209?",
+        "answer_keywords": [
+            "14.3",
+            "years",
+            "RX-209"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_024",
+        "fact": "The resonant frequency of Module Kappa is 440.7 hertz.",
+        "question": "What is the resonant frequency of Module Kappa?",
+        "answer_keywords": [
+            "440.7",
+            "hertz",
+            "Kappa"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_025",
+        "fact": "The safe pressure threshold for Chamber 6 is 12.8 bar.",
+        "question": "What is the safe pressure threshold for Chamber 6?",
+        "answer_keywords": [
+            "12.8",
+            "bar",
+            "Chamber 6"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_026",
+        "fact": "The target orbital altitude for Satellite Lyra is 550 kilometres.",
+        "question": "What is the target orbital altitude for Satellite Lyra?",
+        "answer_keywords": [
+            "550",
+            "kilometres",
+            "Lyra"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_027",
+        "fact": "The maximum data retention period for Server Cluster 4 is 180 days.",
+        "question": "What is the maximum data retention period for Server Cluster 4?",
+        "answer_keywords": [
+            "180",
+            "days",
+            "Cluster 4"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_028",
+        "fact": "The minimum refresh rate for Display Panel Model V-9 is 144 hertz.",
+        "question": "What is the minimum refresh rate for Display Panel Model V-9?",
+        "answer_keywords": [
+            "144",
+            "hertz",
+            "V-9"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_029",
+        "fact": "Operation Nightfall was authorised on 3 December 2021 by Director Walsh.",
+        "question": "When was Operation Nightfall authorised and by whom?",
+        "answer_keywords": [
+            "December 2021",
+            "2021",
+            "Walsh",
+            "Nightfall"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_030",
+        "fact": "The Meridian Accords were signed on 17 April 1998 in Geneva.",
+        "question": "When and where were the Meridian Accords signed?",
+        "answer_keywords": [
+            "April 1998",
+            "1998",
+            "Geneva"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_031",
+        "fact": "The Argus telescope achieved first light on 28 February 2029.",
+        "question": "When did the Argus telescope achieve first light?",
+        "answer_keywords": [
+            "February 2029",
+            "2029",
+            "28"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_032",
+        "fact": "The Crestwood Bridge was decommissioned on 9 October 2016 after 74 years of service.",
+        "question": "When was the Crestwood Bridge decommissioned and how long had it been in service?",
+        "answer_keywords": [
+            "October 2016",
+            "2016",
+            "74 years"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_033",
+        "fact": "Expedition Polaris departed from Troms\u00f8 on 11 January 2024.",
+        "question": "When and from where did Expedition Polaris depart?",
+        "answer_keywords": [
+            "January 2024",
+            "2024",
+            "Troms\u00f8"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_034",
+        "fact": "The Vega-3 mission achieved Mars orbit insertion on 22 July 2033.",
+        "question": "When did the Vega-3 mission achieve Mars orbit insertion?",
+        "answer_keywords": [
+            "July 2033",
+            "2033",
+            "22"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_035",
+        "fact": "The Elara Protocol was enacted by the Council on 5 March 2018.",
+        "question": "When was the Elara Protocol enacted?",
+        "answer_keywords": [
+            "March 2018",
+            "2018",
+            "Elara"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_036",
+        "fact": "The last recorded eruption of Mount Cinder occurred on 14 August 1873.",
+        "question": "When did Mount Cinder last erupt?",
+        "answer_keywords": [
+            "August 1873",
+            "1873",
+            "14"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_037",
+        "fact": "The underground facility designated Site Rho is located beneath the Ural Mountains at depth 340 metres.",
+        "question": "Where is Site Rho located and at what depth?",
+        "answer_keywords": [
+            "Ural Mountains",
+            "340 metres",
+            "340",
+            "Rho"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_038",
+        "fact": "The wreck of the Valdris is located at coordinates 61.4 North, 2.7 West.",
+        "question": "At what coordinates is the wreck of the Valdris located?",
+        "answer_keywords": [
+            "61.4",
+            "2.7",
+            "North",
+            "West"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_039",
+        "fact": "Research Station Kappa-11 is positioned at 78 degrees North, 15 degrees East.",
+        "question": "What are the coordinates of Research Station Kappa-11?",
+        "answer_keywords": [
+            "78",
+            "15",
+            "North",
+            "East",
+            "Kappa-11"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_040",
+        "fact": "The primary data centre for Project Iris is housed in Building 7 of the Oslo campus.",
+        "question": "Where is the primary data centre for Project Iris housed?",
+        "answer_keywords": [
+            "Building 7",
+            "Oslo",
+            "Iris"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_041",
+        "fact": "The emergency rendezvous point for Team Bravo is Grid Reference QR-447.",
+        "question": "What is the emergency rendezvous point for Team Bravo?",
+        "answer_keywords": [
+            "QR-447",
+            "Grid Reference",
+            "Bravo"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_042",
+        "fact": "The deepest point surveyed in Lake Mireille is 412 metres below the surface.",
+        "question": "What is the deepest point surveyed in Lake Mireille?",
+        "answer_keywords": [
+            "412",
+            "metres",
+            "Mireille"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_043",
+        "fact": "The annual budget allocated to Division Seven is 4.2 million euros.",
+        "question": "What is the annual budget allocated to Division Seven?",
+        "answer_keywords": [
+            "4.2 million",
+            "4.2",
+            "euros",
+            "Division Seven"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_044",
+        "fact": "The minimum quorum required for a Council resolution is 11 of 17 members.",
+        "question": "What is the minimum quorum required for a Council resolution?",
+        "answer_keywords": [
+            "11",
+            "17",
+            "quorum"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_045",
+        "fact": "The maximum allowable dose of Compound TR-8 in clinical trials is 0.4 milligrams per kilogram.",
+        "question": "What is the maximum allowable dose of Compound TR-8?",
+        "answer_keywords": [
+            "0.4",
+            "milligrams",
+            "TR-8"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_046",
+        "fact": "The pipeline from Sector 9 to the refinery carries a maximum of 8,000 barrels per hour.",
+        "question": "What is the maximum throughput of the pipeline from Sector 9 to the refinery?",
+        "answer_keywords": [
+            "8,000",
+            "8000",
+            "barrels",
+            "Sector 9"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_047",
+        "fact": "The gold reserve held in Vault Omega-3 amounts to 1,740 metric tonnes.",
+        "question": "How much gold is held in Vault Omega-3?",
+        "answer_keywords": [
+            "1,740",
+            "1740",
+            "metric tonnes",
+            "Omega-3"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_048",
+        "fact": "The maximum continuous operating time for Unit Sigma before mandatory rest is 72 hours.",
+        "question": "What is the maximum continuous operating time for Unit Sigma?",
+        "answer_keywords": [
+            "72 hours",
+            "72",
+            "Sigma"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_049",
+        "fact": "The cooling system for Block C requires 14,000 litres of coolant per hour.",
+        "question": "How much coolant does the cooling system for Block C require per hour?",
+        "answer_keywords": [
+            "14,000",
+            "14000",
+            "litres",
+            "Block C"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_050",
+        "fact": "The specimen designated Sample 7-Epsilon has a mass of 2.317 grams.",
+        "question": "What is the mass of Sample 7-Epsilon?",
+        "answer_keywords": [
+            "2.317",
+            "grams",
+            "7-Epsilon"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_051",
+        "fact": "The attenuation coefficient of material Xenite at 10 GHz is 0.0034 per metre.",
+        "question": "What is the attenuation coefficient of Xenite at 10 GHz?",
+        "answer_keywords": [
+            "0.0034",
+            "per metre",
+            "Xenite",
+            "10 GHz"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_052",
+        "fact": "The thermal expansion coefficient of Composite Delta-4 is 11.7 parts per million per degree Celsius.",
+        "question": "What is the thermal expansion coefficient of Composite Delta-4?",
+        "answer_keywords": [
+            "11.7",
+            "parts per million",
+            "Delta-4"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_053",
+        "fact": "The refractive index of Crystal Sigma at 589 nanometres is 1.723.",
+        "question": "What is the refractive index of Crystal Sigma at 589 nanometres?",
+        "answer_keywords": [
+            "1.723",
+            "refractive",
+            "Sigma",
+            "589"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_054",
+        "fact": "The activation energy for Reaction Pathway Gamma is 84.3 kilojoules per mole.",
+        "question": "What is the activation energy for Reaction Pathway Gamma?",
+        "answer_keywords": [
+            "84.3",
+            "kilojoules",
+            "Gamma"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_055",
+        "fact": "The magnetic permeability of Alloy Kappa-9 is 4.2 times that of free space.",
+        "question": "What is the magnetic permeability of Alloy Kappa-9?",
+        "answer_keywords": [
+            "4.2",
+            "Kappa-9",
+            "permeability"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_056",
+        "fact": "Colonel Petra Vasquez was appointed Director of Sector Operations on 1 February 2022.",
+        "question": "Who was appointed Director of Sector Operations and when?",
+        "answer_keywords": [
+            "Petra Vasquez",
+            "Vasquez",
+            "February 2022",
+            "2022"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_057",
+        "fact": "The chief architect of the Nexus Protocol is Dr. Reuben Ashford.",
+        "question": "Who is the chief architect of the Nexus Protocol?",
+        "answer_keywords": [
+            "Reuben Ashford",
+            "Ashford",
+            "Nexus Protocol"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_058",
+        "fact": "The whistleblower who disclosed the Orion files goes by the pseudonym Caspian.",
+        "question": "What pseudonym does the whistleblower who disclosed the Orion files use?",
+        "answer_keywords": [
+            "Caspian",
+            "pseudonym",
+            "Orion"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_059",
+        "fact": "Project Lighthouse is overseen by the Joint Technical Committee chaired by Dr. Maren Solberg.",
+        "question": "Who chairs the committee overseeing Project Lighthouse?",
+        "answer_keywords": [
+            "Maren Solberg",
+            "Solberg",
+            "Lighthouse"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_060",
+        "fact": "The founding member who left Consortium Alpha in 2009 was Ingrid Thalberg.",
+        "question": "Which founding member left Consortium Alpha in 2009?",
+        "answer_keywords": [
+            "Ingrid Thalberg",
+            "Thalberg",
+            "Consortium Alpha"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_061",
+        "fact": "Under Protocol Zeta, all Level-4 containment breaches must be reported within 90 seconds.",
+        "question": "What is the reporting time limit for a Level-4 containment breach under Protocol Zeta?",
+        "answer_keywords": [
+            "90 seconds",
+            "90",
+            "Zeta",
+            "Level-4"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_062",
+        "fact": "The evacuation assembly point for Level B personnel is Gate 12.",
+        "question": "What is the evacuation assembly point for Level B personnel?",
+        "answer_keywords": [
+            "Gate 12",
+            "12",
+            "Level B"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_063",
+        "fact": "Under Standing Order 44, maintenance window requests must be submitted 48 hours in advance.",
+        "question": "How far in advance must maintenance window requests be submitted under Standing Order 44?",
+        "answer_keywords": [
+            "48 hours",
+            "48",
+            "Standing Order 44"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_064",
+        "fact": "The decontamination cycle for Zone Red requires exactly 22 minutes of UV exposure.",
+        "question": "How long does the decontamination cycle for Zone Red require in UV exposure?",
+        "answer_keywords": [
+            "22 minutes",
+            "22",
+            "Zone Red",
+            "UV"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_065",
+        "fact": "The recommended calibration interval for Instrument Delta is every 500 hours of operation.",
+        "question": "What is the recommended calibration interval for Instrument Delta?",
+        "answer_keywords": [
+            "500 hours",
+            "500",
+            "Delta"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_066",
+        "fact": "The fallback communication channel if primary link fails is frequency 156.8 MHz.",
+        "question": "What is the fallback communication channel if the primary link fails?",
+        "answer_keywords": [
+            "156.8",
+            "MHz",
+            "fallback"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_067",
+        "fact": "Enzyme TR-Alpha reaches maximum catalytic efficiency at pH 6.8.",
+        "question": "At what pH does Enzyme TR-Alpha reach maximum catalytic efficiency?",
+        "answer_keywords": [
+            "6.8",
+            "pH",
+            "TR-Alpha"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_068",
+        "fact": "Pathogen Strain VX-11 has an incubation period of 3 to 7 days.",
+        "question": "What is the incubation period of Pathogen Strain VX-11?",
+        "answer_keywords": [
+            "3 to 7 days",
+            "3",
+            "7",
+            "VX-11"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_069",
+        "fact": "The vaccine designated CVX-9 requires three doses administered 28 days apart.",
+        "question": "How many doses does vaccine CVX-9 require and at what interval?",
+        "answer_keywords": [
+            "three doses",
+            "28 days",
+            "CVX-9",
+            "3"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_070",
+        "fact": "Protein Beta-2 is encoded on chromosome 11 at position q23.3.",
+        "question": "Where is Protein Beta-2 encoded?",
+        "answer_keywords": [
+            "chromosome 11",
+            "q23.3",
+            "Beta-2"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_071",
+        "fact": "The median survival rate for patients on Treatment Protocol Gamma is 31 months.",
+        "question": "What is the median survival rate for patients on Treatment Protocol Gamma?",
+        "answer_keywords": [
+            "31 months",
+            "31",
+            "Protocol Gamma"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_072",
+        "fact": "Compound NX-7 has a boiling point of 312 degrees Celsius at standard pressure.",
+        "question": "What is the boiling point of Compound NX-7?",
+        "answer_keywords": [
+            "312",
+            "Celsius",
+            "NX-7"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_073",
+        "fact": "Polymer Chain Epsilon-4 has a molecular weight of 48,700 daltons.",
+        "question": "What is the molecular weight of Polymer Chain Epsilon-4?",
+        "answer_keywords": [
+            "48,700",
+            "48700",
+            "daltons",
+            "Epsilon-4"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_074",
+        "fact": "The solubility of Salt Compound K-9 in water at 25 degrees Celsius is 34.7 grams per litre.",
+        "question": "What is the solubility of Salt Compound K-9 in water at 25 degrees Celsius?",
+        "answer_keywords": [
+            "34.7",
+            "grams per litre",
+            "K-9"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_075",
+        "fact": "Catalyst RC-30 reduces the activation energy of Reaction Beta by 29 kilojoules per mole.",
+        "question": "By how much does Catalyst RC-30 reduce the activation energy of Reaction Beta?",
+        "answer_keywords": [
+            "29",
+            "kilojoules",
+            "RC-30"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_076",
+        "fact": "Version 4.1 of the Nexus operating system introduced the adaptive memory scheduler.",
+        "question": "Which version of the Nexus operating system introduced the adaptive memory scheduler?",
+        "answer_keywords": [
+            "Version 4.1",
+            "4.1",
+            "Nexus"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_077",
+        "fact": "The default timeout for API calls in Framework Sigma is 30 seconds.",
+        "question": "What is the default timeout for API calls in Framework Sigma?",
+        "answer_keywords": [
+            "30 seconds",
+            "30",
+            "Sigma"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_078",
+        "fact": "The legacy database migration from System Orion to System Atlas completed on 7 November 2020.",
+        "question": "When did the legacy database migration from System Orion to System Atlas complete?",
+        "answer_keywords": [
+            "November 2020",
+            "2020",
+            "7"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_079",
+        "fact": "The maximum concurrent sessions supported by Node Cluster Beta is 12,000.",
+        "question": "What is the maximum number of concurrent sessions supported by Node Cluster Beta?",
+        "answer_keywords": [
+            "12,000",
+            "12000",
+            "Cluster Beta"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_080",
+        "fact": "The primary encryption algorithm used in Protocol Tau is AES-256-GCM.",
+        "question": "What encryption algorithm is used in Protocol Tau?",
+        "answer_keywords": [
+            "AES-256-GCM",
+            "AES-256",
+            "GCM",
+            "Tau"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_081",
+        "fact": "The annual mean temperature at Station Boreal is minus 14.3 degrees Celsius.",
+        "question": "What is the annual mean temperature at Station Boreal?",
+        "answer_keywords": [
+            "14.3",
+            "Celsius",
+            "Boreal",
+            "minus"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_082",
+        "fact": "The River Maelvik reaches its highest recorded flow of 3,400 cubic metres per second in May.",
+        "question": "What is the highest recorded flow of the River Maelvik and when does it occur?",
+        "answer_keywords": [
+            "3,400",
+            "3400",
+            "cubic metres",
+            "May",
+            "Maelvik"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_083",
+        "fact": "The protected zone around Lagoon Cetara extends 12 nautical miles from the shoreline.",
+        "question": "How far does the protected zone around Lagoon Cetara extend?",
+        "answer_keywords": [
+            "12 nautical miles",
+            "12",
+            "Cetara"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_084",
+        "fact": "Peak Avalon stands at 4,872 metres above sea level.",
+        "question": "What is the height of Peak Avalon?",
+        "answer_keywords": [
+            "4,872",
+            "4872",
+            "metres",
+            "Avalon"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_085",
+        "fact": "The Fenwick Fund achieved a net return of 18.4 percent in the fiscal year 2026.",
+        "question": "What net return did the Fenwick Fund achieve in fiscal year 2026?",
+        "answer_keywords": [
+            "18.4",
+            "percent",
+            "Fenwick",
+            "2026"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_086",
+        "fact": "The total debt of Corporation Arctus as of Q3 2025 was 2.1 billion euros.",
+        "question": "What was the total debt of Corporation Arctus as of Q3 2025?",
+        "answer_keywords": [
+            "2.1 billion",
+            "2.1",
+            "Arctus",
+            "2025"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_087",
+        "fact": "The break-even point for Project Solace was reached after 7,200 units sold.",
+        "question": "After how many units sold did Project Solace reach break-even?",
+        "answer_keywords": [
+            "7,200",
+            "7200",
+            "Solace"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_088",
+        "fact": "The Ashford Expedition was the first to cross the Karavas Plateau in winter, achieving this on 2 January 1931.",
+        "question": "When did the Ashford Expedition first cross the Karavas Plateau in winter?",
+        "answer_keywords": [
+            "January 1931",
+            "1931",
+            "Ashford",
+            "Karavas"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_089",
+        "fact": "The treaty between the Vellen Federation and the Coris Republic was ratified on 4 June 1962.",
+        "question": "When was the treaty between the Vellen Federation and the Coris Republic ratified?",
+        "answer_keywords": [
+            "June 1962",
+            "1962",
+            "Vellen",
+            "Coris"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_090",
+        "fact": "The world record for continuous data transmission over a single fibre optic strand is 22.9 petabits per second.",
+        "question": "What is the world record for continuous data transmission over a single fibre optic strand?",
+        "answer_keywords": [
+            "22.9",
+            "petabits",
+            "fibre optic"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_091",
+        "fact": "Model Theta-9 achieved a BLEU score of 47.3 on the WMT benchmark.",
+        "question": "What BLEU score did Model Theta-9 achieve on the WMT benchmark?",
+        "answer_keywords": [
+            "47.3",
+            "BLEU",
+            "Theta-9",
+            "WMT"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_092",
+        "fact": "The context window of Architecture Kronos-V is 131,072 tokens.",
+        "question": "What is the context window of Architecture Kronos-V?",
+        "answer_keywords": [
+            "131,072",
+            "131072",
+            "tokens",
+            "Kronos-V"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_093",
+        "fact": "Training run Sigma-4 consumed 1.4 million GPU-hours of compute.",
+        "question": "How much compute did training run Sigma-4 consume?",
+        "answer_keywords": [
+            "1.4 million",
+            "GPU-hours",
+            "Sigma-4"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_094",
+        "fact": "The embedding dimension of Encoder Model Lyre is 768.",
+        "question": "What is the embedding dimension of Encoder Model Lyre?",
+        "answer_keywords": [
+            "768",
+            "Lyre"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_095",
+        "fact": "Dataset Helios-Bench contains 2.4 million annotated question-answer pairs.",
+        "question": "How many annotated question-answer pairs does Dataset Helios-Bench contain?",
+        "answer_keywords": [
+            "2.4 million",
+            "Helios-Bench"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_096",
+        "fact": "The Crestfallen manuscript was authenticated in 1947 by Professor Otto Lindqvist.",
+        "question": "When and by whom was the Crestfallen manuscript authenticated?",
+        "answer_keywords": [
+            "1947",
+            "Otto Lindqvist",
+            "Lindqvist"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_097",
+        "fact": "The Altair genome sequence was completed in 2003 at a cost of 12 million dollars.",
+        "question": "When was the Altair genome sequence completed and at what cost?",
+        "answer_keywords": [
+            "2003",
+            "12 million",
+            "Altair"
+        ],
+        "depth": "middle"
+    },
+    {
+        "id": "nb_098",
+        "fact": "The Neumayer station recorded a peak wind gust of 87 metres per second on 6 July 2019.",
+        "question": "What peak wind gust did the Neumayer station record and when?",
+        "answer_keywords": [
+            "87 metres per second",
+            "87",
+            "Neumayer",
+            "2019"
+        ],
+        "depth": "shallow"
+    },
+    {
+        "id": "nb_099",
+        "fact": "The safe storage temperature for reagent Compound LX-4 is between minus 20 and minus 80 degrees Celsius.",
+        "question": "What is the safe storage temperature range for Compound LX-4?",
+        "answer_keywords": [
+            "minus 20",
+            "minus 80",
+            "LX-4"
+        ],
+        "depth": "deep"
+    },
+    {
+        "id": "nb_100",
+        "fact": "The call sign of the rescue vessel assigned to Grid Sector 9 is Vessel Kestrel.",
+        "question": "What is the call sign of the rescue vessel assigned to Grid Sector 9?",
+        "answer_keywords": [
+            "Kestrel",
+            "Vessel Kestrel",
+            "Sector 9"
+        ],
+        "depth": "middle"
+    }
 ]
+
 
 HAYSTACK_SIZES = {
     "short":  15,

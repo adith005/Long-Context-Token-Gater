@@ -369,7 +369,7 @@ def run_ablation(
                     raw_cands.sort(key=lambda x: x["confidence"], reverse=True)
 
                     # ── Gate ──────────────────────────────────────────────────
-                    window, stats = gate(raw_cands, mode)
+                    window, stats = gate(raw_cands, mode, query=query)
                     recalled      = needle_in_window(needle["fact"], window)
                     prompt        = build_prompt(window, query)
                     prompt_tokens = estimate_tokens(prompt)

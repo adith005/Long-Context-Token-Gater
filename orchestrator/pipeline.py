@@ -127,6 +127,45 @@ def run_pipeline(user_query: str, gating_mode: str = "entropy", tracer=None) -> 
             ],
         })
 
+    elif gating_mode == "joint":
+        from gating.joint_entropy_gater import JointEntropyMemorySelector
+        mems     = [{"text": c.get("content",""), "similarity": c.get("confidence",0)/100}
+                    for c in candidates]
+        selector = JointEntropyMemorySelector(mems, similarity_threshold=0.3)
+        result   = selector.select_optimal_greedy(target_size=15, method="joint_entropy")
+        selected_items = [candidates[i] for i in result["selected_indices"]]
+        context  = {"stats": {"strategy": "joint", "window_size": len(selected_items)}}
+
+        trace(4, "Token Gating (joint)", {
+            "mode":          "joint",
+            "candidates_in": len(candidates),
+            "window_size":   len(selected_items),
+            "joint_entropy": result.get("total_entropy", 0),
+        })
+
+    elif gating_mode == "quantum":
+        from gating.quantum_gater import quantum_inspired_gate
+        contents          = [c.get("content","") for c in candidates]
+        memory_embeddings = [embed(c) for c in contents]
+        result_q = quantum_inspired_gate(
+            query             = query,
+            query_embedding   = q_vec,
+            memory_embeddings = memory_embeddings,
+            memory_contents   = contents,
+            top_k_initial     = 15,
+        )
+        selected_texts = set(result_q["selected_memories"])
+        selected_items = [c for c in candidates if c.get("content","") in selected_texts]
+        context = {"stats": {"strategy": "quantum", "window_size": len(selected_items),
+                              **result_q.get("quantum_metrics", {})}}
+
+        trace(4, "Token Gating (quantum)", {
+            "mode":          "quantum",
+            "candidates_in": len(candidates),
+            "window_size":   len(selected_items),
+            "quantum_metrics": result_q.get("quantum_metrics", {}),
+        })
+
     else:  # none
         selected_items = candidates
         context = {"stats": {"strategy": "none"}}

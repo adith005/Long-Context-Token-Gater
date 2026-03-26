@@ -34,10 +34,11 @@ def call_llm(prompt: str) -> dict:
         elapsed = time.time() - start_time
         
         return {
-            "response_text": data["choices"][0]["message"]["content"],
-            "prompt_tokens": data["usage"]["prompt_tokens"],
-            "completion_tokens": data["usage"]["completion_tokens"],
-            "total_time_sec": elapsed
+            "response_text":    data["choices"][0]["message"]["content"],
+            "prompt_tokens":    data["usage"]["prompt_tokens"],
+            "completion_tokens":data["usage"]["completion_tokens"],
+            "total_time_sec":   elapsed,
+            "error":            None,
         }
     except Exception as e:
         print(f"Error calling LLM: {e}")
