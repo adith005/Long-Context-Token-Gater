@@ -1346,7 +1346,7 @@ def gate(candidates: list, mode: str, query: str = "") -> tuple:
             memory_contents  = contents,
             top_k_initial    = 15,
         )
-        selected_texts = {m["content"] for m in result["selected_memories"]}
+        selected_texts = {m["content"] if isinstance(m, dict) else m for m in result["selected_memories"]}
         selected = [c for c in candidates if c["content"] in selected_texts]
         return selected, {"strategy": "quantum", "window_size": len(selected),
                       "quantum_metrics": result.get("quantum_metrics", {})}
