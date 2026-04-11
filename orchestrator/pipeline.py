@@ -166,6 +166,20 @@ def run_pipeline(user_query: str, gating_mode: str = "entropy", tracer=None) -> 
             "quantum_metrics": result_q.get("quantum_metrics", {}),
         })
 
+    elif gating_mode == "hybrid":
+        # Hybrid gating: use all candidates (no pre-selection) then
+        # apply prompt-level word filtering after prompt assembly.
+        # selected_items carries all candidates; the actual compression
+        # happens in step 5 below.
+        selected_items = candidates
+        context = {"stats": {"strategy": "hybrid", "candidates_in": len(candidates)}}
+
+        trace(4, "Token Gating (hybrid — deferred to prompt level)", {
+            "mode":          "hybrid",
+            "candidates_in": len(candidates),
+            "note":          "prompt-level compression applied at step 5",
+        })
+
     else:  # none
         selected_items = candidates
         context = {"stats": {"strategy": "none"}}
@@ -179,11 +193,27 @@ def run_pipeline(user_query: str, gating_mode: str = "entropy", tracer=None) -> 
     # ── 5. Prompt Creation ────────────────────────────────────────────────────
     prompt = build_prompt(selected_items, query)
 
+    # Apply hybrid prompt-level compression if mode is hybrid
+    hybrid_stats = {}
+    if gating_mode == "hybrid":
+        from gating.hybrid_gater import apply_hybrid_gating
+        hybrid_result = apply_hybrid_gating(prompt, mode="auto")
+        prompt        = hybrid_result.compressed_prompt
+        hybrid_stats  = hybrid_result.stats
+        context["stats"].update({
+            "window_size":            hybrid_result.compressed_word_count,
+            "original_words":         hybrid_result.original_word_count,
+            "compressed_words":       hybrid_result.compressed_word_count,
+            "word_compression_ratio": hybrid_result.stats["word_compression_ratio"],
+            "sub_strategy":           hybrid_result.selected_strategy,
+        })
+
     trace(5, "Prompt Assembly", {
-        "context_items":   len(selected_items),
-        "prompt_chars":    len(prompt),
+        "context_items":    len(selected_items),
+        "prompt_chars":     len(prompt),
         "estimated_tokens": max(1, len(prompt) // 4),
-        "prompt_preview":  prompt[:300] + ("..." if len(prompt) > 300 else ""),
+        "prompt_preview":   prompt[:300] + ("..." if len(prompt) > 300 else ""),
+        **hybrid_stats,
     })
 
     # ── 6. LLM Call ───────────────────────────────────────────────────────────

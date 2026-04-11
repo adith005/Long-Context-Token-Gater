@@ -67,6 +67,9 @@ MEMORY_TTL_DAYS         = _cfg("MEMORY_TTL_DAYS",         30)
 MEMORY_TTL_USEFULNESS   = _cfg("MEMORY_TTL_USEFULNESS",   0.3)
 
 # Source weights — how much to trust each source type
+# Clustering — number of clusters for two-phase retrieval
+N_CLUSTERS              = _cfg("N_CLUSTERS", 16)   # set 0 to disable clustering
+
 SOURCE_WEIGHTS: Dict[str, float] = {
     "exchange": 0.8,   # conversational Q+A
     "chat":     0.6,   # raw chat turn
@@ -238,6 +241,14 @@ class RedisMemoryStore:
         """
         Retrieve top-k memories using the full weighted scoring formula.
 
+        Two-phase retrieval (when clusters exist)
+        -----------------------------------------
+        Phase 1: find the top-3 nearest cluster centroids to the query.
+        Phase 2: score only the memories belonging to those clusters.
+
+        Falls back to full linear scan if no cluster centroids are stored
+        (i.e. build_clusters() has not been called yet).
+
         Scoring
         -------
           raw  = SIM_W×sim + ACCESS_W×norm_access + RECENCY_W×recency + SOURCE_W×src_w
@@ -245,10 +256,26 @@ class RedisMemoryStore:
 
         Entries below MIN_SIM_FLOOR are dropped before scoring.
         """
-        keys = self.redis.keys("mem:*")
-        candidates = []
+        # ── Phase 1: cluster-based candidate filtering ─────────────────────
+        top_cluster_ids = self.get_top_k_clusters(query_vec, k=3)
+        use_clustering  = len(top_cluster_ids) > 0
 
-        for key in keys:
+        if use_clustering:
+            # Collect keys from top clusters only
+            candidate_keys = []
+            for cid in top_cluster_ids:
+                pattern = f"mem:{cid}:*".encode()
+                candidate_keys.extend(self.redis.keys(pattern))
+            # Safety: if cluster scan returns nothing, fall back to full scan
+            if not candidate_keys:
+                use_clustering  = False
+                candidate_keys  = self.redis.keys("mem:*")
+        else:
+            candidate_keys = self.redis.keys("mem:*")
+
+        # ── Phase 2: score candidates ──────────────────────────────────────
+        candidates = []
+        for key in candidate_keys:
             data = self.redis.hgetall(key)
             if b"embedding" not in data:
                 continue
@@ -256,7 +283,6 @@ class RedisMemoryStore:
             vec = self._deserialize_vector(data[b"embedding"])
             sim = self._cosine_similarity(query_vec, vec)
 
-            # ── 7. Min-similarity floor ────────────────────────────────────
             if sim < MIN_SIM_FLOOR:
                 continue
 
@@ -273,17 +299,12 @@ class RedisMemoryStore:
         if not candidates:
             return []
 
-        # ── Normalise access_count across candidates ───────────────────────
         max_access = max(c["access_count"] for c in candidates) or 1
 
         for c in candidates:
             norm_access = c["access_count"] / max_access
-
-            # ── 3. Recency decay ───────────────────────────────────────────
-            recency = self._recency_score(c["timestamp"])
-
-            # ── 6. Source weighting ────────────────────────────────────────
-            src_w = self._source_weight(c["source"])
+            recency     = self._recency_score(c["timestamp"])
+            src_w       = self._source_weight(c["source"])
 
             raw = (
                 RETRIEVAL_SIM_WEIGHT     * c["sim"]     +
@@ -291,24 +312,116 @@ class RedisMemoryStore:
                 RETRIEVAL_RECENCY_WEIGHT * recency       +
                 RETRIEVAL_SOURCE_WEIGHT  * src_w
             )
-
-            # ── 4. Usefulness scaling ──────────────────────────────────────
             c["confidence"] = raw * c["usefulness"] * 100
 
         candidates.sort(key=lambda x: x["confidence"], reverse=True)
 
-        # Strip internal fields before returning
         results = []
         for c in candidates[:top_k]:
             results.append({
-                "content":      c["content"],
-                "confidence":   round(c["confidence"], 4),
-                "source":       c["source"],
-                "timestamp":    c["timestamp"],
-                "access_count": c["access_count"],
-                "usefulness":   c["usefulness"],
+                "content":        c["content"],
+                "confidence":     round(c["confidence"], 4),
+                "source":         c["source"],
+                "timestamp":      c["timestamp"],
+                "access_count":   c["access_count"],
+                "usefulness":     c["usefulness"],
+                "cluster_used":   use_clustering,
             })
         return results
+
+    def build_clusters(self, n_clusters: int = None) -> Dict:
+        """
+        Build cluster centroids from all stored memory embeddings using
+        mini-batch k-means (pure NumPy, no sklearn dependency).
+
+        Assigns each memory entry a cluster_id and stores centroids in Redis
+        as cluster:{id}:centroid keys. After calling this, retrieve_all()
+        automatically uses two-phase retrieval.
+
+        Parameters
+        ----------
+        n_clusters : number of clusters (default: N_CLUSTERS from settings)
+
+        Returns
+        -------
+        { "n_clusters": int, "n_memories": int, "iterations": int }
+        """
+        n_clusters = n_clusters or N_CLUSTERS
+        keys = self.redis.keys("mem:*")
+
+        # Collect all embeddings
+        entries = []
+        for key in keys:
+            data = self.redis.hgetall(key)
+            if b"embedding" not in data:
+                continue
+            vec = self._deserialize_vector(data[b"embedding"])
+            entries.append({"key": key, "vec": vec})
+
+        if len(entries) < n_clusters:
+            n_clusters = max(1, len(entries))
+
+        if not entries:
+            return {"n_clusters": 0, "n_memories": 0, "iterations": 0}
+
+        # Stack embeddings — shape (N, D)
+        X = np.vstack([e["vec"] for e in entries])
+        N, D = X.shape
+
+        # Normalise rows for cosine clustering
+        norms = np.linalg.norm(X, axis=1, keepdims=True)
+        X_norm = X / (norms + 1e-10)
+
+        # Initialise centroids with k-means++ style seeding
+        rng = np.random.RandomState(42)
+        centroids = [X_norm[rng.randint(N)]]
+        for _ in range(n_clusters - 1):
+            dists = np.array([
+                min(1.0 - float(np.dot(x, c)) for c in centroids)
+                for x in X_norm
+            ])
+            dists = np.clip(dists, 0, None)
+            probs = dists / (dists.sum() + 1e-10)
+            centroids.append(X_norm[rng.choice(N, p=probs)])
+        centroids = np.vstack(centroids)   # shape (K, D)
+
+        # Iterate k-means (max 20 iterations)
+        labels  = np.zeros(N, dtype=int)
+        iterations = 0
+        for it in range(20):
+            # Assignment step — cosine similarity = dot product on normalised vecs
+            sims   = X_norm @ centroids.T        # (N, K)
+            new_labels = np.argmax(sims, axis=1)
+            if np.all(new_labels == labels):
+                break
+            labels = new_labels
+            iterations = it + 1
+
+            # Update step
+            for k in range(n_clusters):
+                mask = labels == k
+                if mask.sum() > 0:
+                    centroid = X_norm[mask].mean(axis=0)
+                    norm     = np.linalg.norm(centroid)
+                    centroids[k] = centroid / (norm + 1e-10)
+
+        # Persist centroids to Redis
+        pipe = self.redis.pipeline()
+        for k in range(n_clusters):
+            pipe.set(f"cluster:{k}:centroid", self._serialize_vector(centroids[k]))
+        pipe.execute()
+
+        # Update cluster_id field for each memory entry
+        pipe = self.redis.pipeline()
+        for i, entry in enumerate(entries):
+            pipe.hset(entry["key"], "cluster_id", int(labels[i]))
+        pipe.execute()
+
+        return {
+            "n_clusters": n_clusters,
+            "n_memories": N,
+            "iterations": iterations,
+        }
 
     # ── Usefulness feedback ───────────────────────────────────────────────────
 
@@ -493,3 +606,16 @@ def dedup_memory(threshold: float = None) -> Dict:
 def expire_stale_memory(ttl_days: float = None, usefulness_floor: float = None) -> Dict:
     """Delete old, low-usefulness entries. Returns { scanned, expired }."""
     return _store.expire_stale(ttl_days, usefulness_floor)
+
+
+def cluster_memory(n_clusters: int = None) -> Dict:
+    """
+    Build k-means cluster centroids from all stored memory embeddings.
+    Enables two-phase retrieval in subsequent retrieve_all() calls.
+
+    Call this after bulk injection (e.g. inject_fake_memories.py) and
+    periodically as the memory store grows.
+
+    Returns { n_clusters, n_memories, iterations }.
+    """
+    return _store.build_clusters(n_clusters)
