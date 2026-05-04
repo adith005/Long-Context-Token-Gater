@@ -382,7 +382,7 @@ def run_mass_queries(
     output_path : where to save the JSON results.
     verbose     : print progress.
     """
-    modes   = modes   or ["entropy", "simple", "none", "bm25", "joint", "quantum"]
+    modes   = modes   or ["entropy", "simple", "none", "bm25", "joint", "quantum", "hybrid"]
     queries = QUERY_BANK[:query_limit] if query_limit else QUERY_BANK
 
     total   = len(queries) * len(modes)
@@ -483,8 +483,8 @@ def run_mass_queries(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Mass query runner for paper results")
     parser.add_argument("--modes", nargs="+",
-                    default=["entropy", "simple", "none", "bm25", "joint", "quantum"],
-                    choices=["entropy", "simple", "none", "bm25", "joint", "quantum"],
+                    default=["entropy", "simple", "none", "bm25", "joint", "quantum", "hybrid"],
+                    choices=["entropy", "simple", "none", "bm25", "joint", "quantum", "hybrid"],
                     help="Gating modes to test")
     parser.add_argument("--queries", type=int, default=None,
                         help="Max queries to run (default: all 60)")
