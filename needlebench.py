@@ -1538,7 +1538,7 @@ def run_benchmark(
     progress_cb(current, total, result) is called after each test for
     Streamlit progress bar.
     """
-    modes          = modes          or modes or ["entropy", "simple", "none", "bm25", "joint", "quantum"]
+    modes          = modes          or modes or ["entropy", "simple", "none", "bm25", "joint", "quantum", "hybrid"]
     haystack_sizes = haystack_sizes or ["short", "medium", "long"]
 
     all_results = []
@@ -1753,7 +1753,7 @@ def _print_summary(summary: dict, modes, haystack_sizes):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="NeedleBench for Token Gater")
     parser.add_argument("--mode", nargs="+", default=["entropy", "simple", "none", "bm25"],
-                    choices=["entropy", "simple", "none", "bm25", "joint", "quantum"])
+                    choices=["entropy", "simple", "none", "bm25", "joint", "quantum", "hybrid"])
     parser.add_argument("--haystack", nargs="+", default=["short", "medium", "long"],
                         choices=["short", "medium", "long"])
     parser.add_argument("--llm",      action="store_true",

@@ -288,7 +288,7 @@ def run_ablation(
     from utils.embedding import embed
 
     config_names   = config_names   or list(ABLATION_CONFIGS.keys())
-    modes          = modes          or ["entropy", "simple", "none", "bm25", "joint", "quantum"]
+    modes          = modes          or ["entropy", "simple", "none", "bm25", "joint", "quantum", "hybrid"]
     haystack_sizes = haystack_sizes or ["short", "medium", "long"]
 
     configs = {n: ABLATION_CONFIGS[n] for n in config_names if n in ABLATION_CONFIGS}
